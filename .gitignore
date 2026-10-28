@@ -1,0 +1,21 @@
+node_modules/
+.next/
+.env*
+!.env.example
+*.tsbuildinfo
+
+data/
+
+# Local planning, agent state and screenshots
+PLAN.md
+docs/SPEC.md
+docs/ENTREGAS.md
+.agents/
+.claude-flow/
+.scratch/
+.specify/
+.swarm/
+preview*.png
+.DS_Store
+*.sqlite*
+*.key
