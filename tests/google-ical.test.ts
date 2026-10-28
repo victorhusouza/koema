@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { GoogleCalendarError } from '../lib/google-calendar.ts';
 import { listIcalEvents, openIcalStore, validateGoogleIcalUrl } from '../lib/google-ical.ts';
 
 const url = 'https://calendar.google.com/calendar/ical/account%40gmail.com/private-secret-token/basic.ics';
@@ -40,6 +41,25 @@ test('rejects redirects outside the Google calendar host without fetching them',
   return new Response(null, { status: 302, headers: { Location: 'https://169.254.169.254/latest/meta-data' } });
  }), /endereço não permitido/);
  assert.equal(calls, 1);
+});
+
+test('follows permitted Google redirects and normalizes explicit time zones across the Belem date boundary', async () => {
+ let calls=0;
+ const redirected=await listIcalEvents(url,'2026-10-29',async requestUrl=>{
+  calls+=1;
+  if(calls===1)return new Response(null,{status:302,headers:{Location:'/calendar/ical/other%40gmail.com/private-next/basic.ics'}});
+  assert.equal(requestUrl,'https://calendar.google.com/calendar/ical/other%40gmail.com/private-next/basic.ics');
+  return new Response(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:timezone-boundary@example.test\r\nDTSTAMP:20261026T120000Z\r\nDTSTART;TZID=America/New_York:20261028T233000\r\nDTEND;TZID=America/New_York:20261029T003000\r\nSUMMARY:Evento em fuso explícito\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+ });
+ assert.equal(calls,2);
+ assert.deepEqual(redirected.map(event=>({date:event.date,time:event.time,endTime:event.endTime})),[{date:'2026-10-29',time:'00:30',endTime:'01:30'}]);
+});
+
+test('reports declared and streamed size limits and fetch failures as bounded errors', async () => {
+ await assert.rejects(listIcalEvents(url,'2026-10-28',async()=>new Response(null,{headers:{'Content-Length':String(2*1024*1024+1)}})),(error:unknown)=>error instanceof GoogleCalendarError&&error.code==='ical_too_large');
+ const oversized=new ReadableStream<Uint8Array>({start(controller){controller.enqueue(new Uint8Array(2*1024*1024+1));controller.close();}});
+ await assert.rejects(listIcalEvents(url,'2026-10-28',async()=>new Response(oversized)),(error:unknown)=>error instanceof GoogleCalendarError&&error.code==='ical_too_large');
+ await assert.rejects(listIcalEvents(url,'2026-10-28',async()=>{throw new Error('simulated timeout');}),(error:unknown)=>error instanceof GoogleCalendarError&&error.code==='ical_fetch_error');
 });
 
 test('stores the secret URL encrypted and preserves it across store reopen', () => {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, Clock3, Leaf, Pencil, Sparkles, X } from 'lucide-react';
 import type { Briefing } from '../lib/briefing';
+import { canApplyBriefingLoad } from '../lib/briefing-load-guard';
 import { localDay } from '../lib/task-dates';
 import styles from './briefing-panel.module.css';
 
@@ -31,7 +32,7 @@ export default function BriefingPanel({ mode }: { mode: 'today' | 'history' | 'h
   const [date, setDate] = useState(localDay());
   const [content, setContent] = useState<BriefContent>(emptyContent);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [error, setError] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
@@ -42,6 +43,7 @@ export default function BriefingPanel({ mode }: { mode: 'today' | 'history' | 'h
   const versionRef = useRef(0);
   const dirtyRef = useRef(false);
   const requestRef = useRef<Promise<boolean> | null>(null);
+  const loadRequestRef = useRef(0);
 
   useEffect(() => {
     const tick = () => setToday(localDay());
@@ -75,17 +77,21 @@ export default function BriefingPanel({ mode }: { mode: 'today' | 'history' | 'h
   }, []);
 
   const loadDate = useCallback(async (nextDate: string) => {
+    const requestId = ++loadRequestRef.current;
+    const loadedVersion = versionRef.current;
     setLoading(true); setError(''); setStatus('idle');
     try {
       const response = await fetch(`/api/briefings/${nextDate}`, { cache: 'no-store' });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Não foi possível carregar o briefing.');
       const next = body && body.date ? { Hoje: body.Hoje || '', Pendências: body.Pendências || '', Semana: body.Semana || '' } : emptyContent;
+      if (!canApplyBriefingLoad({ requestId, currentRequestId: loadRequestRef.current, loadedVersion, currentVersion: versionRef.current })) return;
       dateRef.current = nextDate; contentRef.current = next; dirtyRef.current = false;
       setDate(nextDate); setContent(next);
     } catch (cause) {
+      if (requestId !== loadRequestRef.current) return;
       setError(cause instanceof Error ? cause.message : 'Não foi possível carregar o briefing.'); setStatus('error');
-    } finally { setLoading(false); }
+    } finally { if (requestId === loadRequestRef.current) setLoading(false); }
   }, []);
 
   useEffect(() => { void loadDate(localDay()); void loadHistory(); }, [loadDate, loadHistory]);
@@ -154,7 +160,7 @@ export default function BriefingPanel({ mode }: { mode: 'today' | 'history' | 'h
 
   if (mode === 'hidden') return null;
   if (mode === 'today') return <section className="card briefing">
-    <div className="section-top"><div className="section-label"><Sparkles size={17}/><span>SEU BRIEFING</span></div><button className="text-button" onClick={() => setEditorOpen(true)}><Pencil size={14}/> {content.Hoje || content.Pendências || content.Semana ? 'Editar briefing' : 'Adicionar briefing de hoje'}</button></div>
+    <div className="section-top"><div className="section-label"><Sparkles size={17}/><span>SEU BRIEFING</span></div><button className="text-button" disabled={loading} onClick={() => setEditorOpen(true)}><Pencil size={14}/> {content.Hoje || content.Pendências || content.Semana ? 'Editar briefing' : 'Adicionar briefing de hoje'}</button></div>
     <h2>Bom dia, Victor!</h2><p className="brief-date">BRIEFING DE {dateStamp(today).toLocaleUpperCase('pt-BR')}</p>
     <div className="brief-notebook">{sections.map(section => <div key={section}><h3>{section}</h3>{loading ? <p className={styles.emptySection}>Carregando briefing…</p> : renderPoints(content[section])}</div>)}</div>
     <div className="brief-footer"><span className="tiny-dot"/> {status === 'saving' ? 'Salvando…' : status === 'saved' ? 'Salvo' : status === 'error' ? 'Erro ao salvar' : content.Hoje || content.Pendências || content.Semana ? 'Briefing do dia' : 'Nenhum briefing enviado'} <span className="dot-separator">·</span> {dateName(today)} <Leaf size={15}/></div>

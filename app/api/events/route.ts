@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { openEventStore } from '../../../lib/event-store.ts';
 import { EventInputError } from '../../../lib/events.ts';
+import { eventMutationError } from '../../../lib/request-origin.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+ const rejected = eventMutationError(request);
+ if (rejected) return rejected;
  try {
   const input = await request.json(); const db = store(); try { return Response.json(db.create(input), { status: 201 }); } finally { db.close(); }
  } catch (error) {

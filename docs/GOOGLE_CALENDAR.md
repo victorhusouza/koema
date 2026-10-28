@@ -21,7 +21,7 @@ The feed may lag behind changes in Google Calendar; this integration does not pr
 
 The secret URL is encrypted with AES-256-GCM in the local SQLite database. The automatically generated 32-byte key is stored at `data/.google-calendar.key` with mode `0600`. Both are excluded from Git. Optional `GOOGLE_TOKEN_ENCRYPTION_KEY` or `GOOGLE_TOKEN_KEY_FILE` settings can override key configuration.
 
-Keep the database and encryption key together in protected backups. The API never returns the secret URL. **Remover endereço salvo** deletes local access without activating another source. To invalidate the feed address at Google, reset the secret address in Google Calendar settings.
+Keep the database and encryption key together in protected backups. Tasks, briefings, and manual appointments are ordinary SQLite records, not encrypted with this key. See the [offline backup and restore procedure](../README.md#offline-backup-and-restore), including how to verify a disposable copy. The API never returns the secret URL. **Remover endereço salvo** deletes local access without activating another source. To invalidate the feed address at Google, reset the secret address in Google Calendar settings.
 
 Requests accept only HTTPS secret-feed URLs on `calendar.google.com`, validate redirects, and enforce response-size and timeout limits. Feed errors are shown separately from an empty calendar.
 

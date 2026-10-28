@@ -23,11 +23,13 @@ export type Project = { id: number; areaId: number; areaName: string; name: stri
 
 function contentSnapshot(task: Task): string {
  return JSON.stringify({
-  title: task.title, project: task.project, when: task.when,
+  title: task.title, when: task.when,
   plannedDate: task.plannedDate ?? null, deadline: task.deadline ?? null,
   notes: task.notes, checklist: task.checklist,
   recurrence: task.recurrence ?? null, recurrenceAnchor:task.recurrenceAnchor??null,
-  areaId:task.areaId??null, projectId:task.projectId??null,
+  // Organization names and a project's parent area are derived labels. A project
+  // move must not look like a direct edit to every task assigned to that project.
+  areaId:task.projectId ? null : task.areaId??null, projectId:task.projectId??null,
  });
 }
 function dayDistance(from: string, to: string): number {
@@ -113,9 +115,48 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
      if(raw.successorId===undefined)continue;const successor=bodies.get(raw.successorId);if(!successor)continue;
      const project=successor.projectId?projectMap.get(successor.projectId):undefined;const areaId=project?.areaId??successor.areaId??null;
      const hydrated={...successor,areaId,projectId:project?.id??null,project:project?`${project.areaName} · ${project.name}`:areaMap.get(areaId??-1)??''};
-     update.run(JSON.stringify({...raw,successorSnapshot:contentSnapshot(hydrated)}),id);
+     const baseline=JSON.parse(contentSnapshot(hydrated)) as Record<string,unknown>;
+     let saved:Record<string,unknown>={};
+     try { const parsed=JSON.parse(raw.successorSnapshot||'{}');if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))saved=parsed; } catch { /* Preserve a conflict on malformed legacy snapshots. */ }
+     const snapshot={...baseline,...saved};delete snapshot.project;
+     if(!('projectId' in saved)&&!('areaId' in saved)){
+      const legacyLabel=typeof saved.project==='string'?saved.project:'';
+      const matches=[...projectMap.values()].filter(item=>`${item.areaName} · ${item.name}`===legacyLabel||(item.name===legacyLabel&&[...projectMap.values()].filter(other=>other.name===legacyLabel).length===1));
+      const oldProject=matches.length===1?matches[0]:undefined;
+      const oldArea=[...areaMap.entries()].find(([,name])=>name===legacyLabel)?.[0];
+      if(oldProject){snapshot.areaId=null;snapshot.projectId=oldProject.id;}
+      else if(oldArea!==undefined){snapshot.areaId=oldArea;snapshot.projectId=null;}
+      else if(legacyLabel||successor.projectId||successor.areaId){snapshot.areaId=null;snapshot.projectId='__legacy_destination_unresolved__';}
+      else {snapshot.areaId=null;snapshot.projectId=null;}
+     }else if(snapshot.projectId){snapshot.areaId=null;}
+     // Anchor is a field introduced by this migration. Seed it from the stored
+     // successor without changing the task's own schedule-derived anchor.
+     snapshot.recurrenceAnchor=successor.recurrenceAnchor??null;
+     update.run(JSON.stringify({...raw,successorSnapshot:JSON.stringify(snapshot)}),id);
     }
     db.exec('PRAGMA user_version=5');
+   }
+   if (version < 6) {
+    // Normalize only the derived display label and project-parent area from the
+    // saved fingerprint. Preserve saved task content and destination IDs.
+    const rows=db.prepare('SELECT id,body FROM tasks').all();
+    const bodies=new Map(rows.map(row=>[Number(row.id),JSON.parse(row.body as string) as Task]));
+    const update=db.prepare('UPDATE tasks SET body=? WHERE id=?');
+    for(const [id,raw] of bodies){
+     if(raw.successorId===undefined)continue;
+     const successor=bodies.get(raw.successorId);if(!successor)continue;
+     let snapshot:Record<string,unknown>;
+     try {
+      snapshot=JSON.parse(raw.successorSnapshot||'{}') as Record<string,unknown>;
+      if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))throw new Error('invalid snapshot');
+     } catch { snapshot={}; }
+     // Keep the old snapshot's task content so edits made before this migration
+     // continue to require confirmation. Only rewrite derived destination data.
+     delete snapshot.project;
+     snapshot.areaId=snapshot.projectId ? null : snapshot.areaId??null;
+     update.run(JSON.stringify({...raw,successorSnapshot:JSON.stringify(snapshot)}),id);
+    }
+    db.exec('PRAGMA user_version=6');
    }
    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_open_per_series ON tasks(json_extract(body, '$.seriesId')) WHERE json_extract(body, '$.seriesId') IS NOT NULL AND json_extract(body, '$.done') = 0;");
    db.exec('COMMIT');

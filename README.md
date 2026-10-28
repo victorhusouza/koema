@@ -25,9 +25,18 @@ See the [calendar setup guide](docs/GOOGLE_CALENDAR.md).
 
 ## Local data
 
-The database and encryption key are stored in `data/`, which is excluded from Git. Local `.env` files are excluded as well. New installations include demonstration data.
+The SQLite database defaults to `data/painel.sqlite`; the iCal encryption key defaults to `data/.google-calendar.key`. Both are excluded from Git. Set `PAINEL_DB_PATH` to use a different database file; the app needs permission to create and update the file and its parent directory. Choose a stable, durable local directory rather than temporary or ephemeral storage. Local `.env` files are excluded as well. New installations include demonstration data.
 
-Authentication is not implemented yet. Keep the application restricted to your own computer until hosting and authentication are prepared. Backup and restore are planned features.
+### Offline backup and restore
+
+1. Stop the Koema process and wait for it to exit. For a consistent SQLite copy, use SQLite's `.backup` command if the `sqlite3` utility is available, for example: `sqlite3 "${PAINEL_DB_PATH:-data/painel.sqlite}" ".backup /secure/backup/painel.sqlite"`. Otherwise copy the database and any matching `-wal`/`-shm` sidecar files together while the app is stopped; never copy only a live main file or a WAL by itself, and never delete a live WAL to force a backup.
+2. Copy the database backup and, when present, `data/.google-calendar.key` to protected backup storage. If `PAINEL_DB_PATH` or `GOOGLE_TOKEN_KEY_FILE` points elsewhere, back up those files instead. If `GOOGLE_TOKEN_ENCRYPTION_KEY` is set, preserve that secret separately in the same protected backup plan.
+3. To verify a backup, copy it into a disposable directory and start Koema with `PAINEL_DB_PATH` set to that copied database. When using a key-file override, point `GOOGLE_TOKEN_KEY_FILE` at the copied key. Open the dashboard and confirm tasks, briefings, manual appointments, and—if configured—the iCal connection can be read. Keep the original backup untouched.
+4. To restore, stop Koema, preserve the current database and key as a separate copy, then place the verified database and matching key at their configured paths. Start Koema and confirm the dashboard opens before removing any retained copies.
+
+The key encrypts the saved iCal secret (and legacy OAuth connection data). Tasks, briefings, and manual appointments are stored in SQLite and are not encrypted by this key. Losing the key makes the saved calendar secret unreadable; it does not encrypt or unlock the other records.
+
+Authentication is not implemented yet. Keep the application restricted to your own computer until hosting and authentication are prepared. Backups and restores are manual; the procedure above does not add an automated backup feature.
 
 ## Validation
 

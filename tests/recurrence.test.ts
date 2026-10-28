@@ -236,6 +236,25 @@ test('periodic reopens retain confirmation protection for an edited successor',(
  }finally{store.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+test('organization renames and project moves do not create recurrence conflicts, but task edits still do',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'painel-recurrence-organization-'));const store=freshStore(join(directory,'test.sqlite'));
+ try{
+  const area=store.createArea({name:'Operações'});const destination=store.createArea({name:'Equipe'});const project=store.createProject({name:'Fechamento',areaId:area.id});
+  const first=store.create({title:'Revisar fechamento',when:'Planejada',plannedDate:'2026-01-31',recurrence:'monthly',areaId:area.id,projectId:project.id});
+  const successor=store.complete(first.id)!.find(row=>row.id!==first.id)!;
+  store.updateArea(area.id,{name:'Finanças'});store.updateProject(project.id,{name:'Fechamento mensal',areaId:destination.id});
+  assert.equal(store.get(successor.id)?.project,'Equipe · Fechamento mensal');
+  let reopened=store.reopen(first.id)!;
+  assert.equal(reopened.find(row=>row.id===first.id)?.done,false);
+  assert.equal(reopened.some(row=>row.id===successor.id),false);
+
+  const second=store.create({title:'Revisar fechamento',when:'Planejada',plannedDate:'2026-02-28',recurrence:'monthly',areaId:destination.id,projectId:project.id});
+  const edited=store.complete(second.id)!.find(row=>row.seriesId===second.seriesId&&row.id!==second.id)!;
+  store.update(edited.id,{title:'Revisar fechamento com ajuste'});
+  assert.throws(()=>store.reopen(second.id),(error:unknown)=>error instanceof RecurrenceConflictError&&error.code==='edited-successor');
+ }finally{store.close();rmSync(directory,{recursive:true,force:true});}
+});
+
 test('migration refreshes daily successor fingerprints without changing existing series behavior',()=>{
  const directory=mkdtempSync(join(tmpdir(),'painel-recurrence-v5-migration-'));const path=join(directory,'test.sqlite');let store=freshStore(path);
  try{
@@ -243,5 +262,53 @@ test('migration refreshes daily successor fingerprints without changing existing
   const db=new DatabaseSync(path);const oldSnapshot={title:successor.title,project:successor.project,when:successor.when,plannedDate:successor.plannedDate??null,deadline:successor.deadline??null,notes:successor.notes,checklist:successor.checklist,recurrence:successor.recurrence??null};
   db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify({...completed,successorSnapshot:JSON.stringify(oldSnapshot)}),first.id);db.exec('PRAGMA user_version=4');db.close();
   store=openTaskStore(path,{now:fixedNow});const reopened=store.reopen(first.id)!;assert.equal(reopened.find(task=>task.id===first.id)?.done,false);assert.equal(reopened.some(task=>task.id===successor.id),false);store.close();
+ }finally{try{store.close();}catch{}rmSync(directory,{recursive:true,force:true});}
+});
+
+test('v4 weekly and monthly series migrate anchors and can reopen migrated successors',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'painel-v4-periodic-migration-'));const path=join(directory,'test.sqlite');let store=freshStore(path);
+ try{
+  const series=['weekly','monthly'] as const;const predecessors:{id:number;recurrence:typeof series[number]}[]=[];
+  for(const recurrence of series){const task=store.create({title:`Revisão ${recurrence}`,when:'Planejada',plannedDate:recurrence==='weekly'?'2026-01-05':'2026-01-31',recurrence});store.complete(task.id);predecessors.push({id:task.id,recurrence});}
+  store.close();
+  const db=new DatabaseSync(path);
+  for(const {id,recurrence} of predecessors){
+   const row=db.prepare('SELECT body FROM tasks WHERE id=?').get(id) as {body:string};const parent=JSON.parse(row.body);
+   const successorRow=db.prepare('SELECT body FROM tasks WHERE id=?').get(parent.successorId) as {body:string};const successor=JSON.parse(successorRow.body);
+   delete parent.recurrenceAnchor;delete successor.recurrenceAnchor;
+   const old={title:successor.title,project:successor.project,when:successor.when,plannedDate:successor.plannedDate??null,deadline:successor.deadline??null,notes:successor.notes,checklist:successor.checklist,recurrence:successor.recurrence??null};
+   parent.successorSnapshot=JSON.stringify(old);
+   if(recurrence==='monthly')successor.title='Edição anterior à migração';
+   db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(parent),id);
+   db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(successor),parent.successorId);
+  }
+  db.exec('PRAGMA user_version=4');db.close();
+  store=openTaskStore(path,{now:()=>new Date('2026-02-01T16:00:00.000Z')});
+  for(const {id,recurrence} of predecessors){
+   const parent=store.get(id)!;const successor=store.get(parent.successorId!)!;
+   assert.ok(parent.recurrenceAnchor);assert.ok(successor.recurrenceAnchor);
+   if(recurrence==='monthly'){
+    assert.throws(()=>store.reopen(id),(error:unknown)=>error instanceof RecurrenceConflictError&&error.code==='edited-successor');
+    assert.equal(store.get(successor.id)?.title,'Edição anterior à migração');
+   }else{
+    const reopened=store.reopen(id)!;assert.equal(reopened.find(row=>row.id===id)?.done,false);assert.equal(reopened.some(row=>row.id===successor.id),false);
+   }
+  }
+ }finally{try{store.close();}catch{}rmSync(directory,{recursive:true,force:true});}
+});
+
+test('v5 fingerprint migration preserves pre-existing successor edits for confirmation',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'painel-v5-edited-successor-'));const path=join(directory,'test.sqlite');let store=freshStore(path);
+ try{
+  const area=store.createArea({name:'Área antiga'});const destination=store.createArea({name:'Área nova'});
+  const task=store.create({title:'Fechamento mensal',when:'Planejada',plannedDate:'2026-01-31',recurrence:'monthly',areaId:area.id});
+  const successor=store.complete(task.id)!.find(row=>row.seriesId===task.seriesId&&row.id!==task.id)!;const parent=store.get(task.id)!;
+  const db=new DatabaseSync(path);
+  const oldSnapshot={title:successor.title,project:successor.project,when:successor.when,plannedDate:successor.plannedDate??null,deadline:successor.deadline??null,notes:successor.notes,checklist:successor.checklist,recurrence:successor.recurrence??null,recurrenceAnchor:successor.recurrenceAnchor??null,areaId:successor.areaId??null,projectId:successor.projectId??null};
+  db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify({...parent,successorSnapshot:JSON.stringify(oldSnapshot)}),task.id);
+  store.update(successor.id,{areaId:destination.id});store.close();
+  db.exec('PRAGMA user_version=5');db.close();
+  store=openTaskStore(path,{now:fixedNow});
+  assert.throws(()=>store.reopen(task.id),(error:unknown)=>error instanceof RecurrenceConflictError&&error.code==='edited-successor');
  }finally{try{store.close();}catch{}rmSync(directory,{recursive:true,force:true});}
 });
