@@ -1,33 +1,35 @@
 # Koema
 
-Painel pessoal com briefing diário, tarefas, projetos e agenda, feito com Next.js, TypeScript e SQLite.
+A personal dashboard for daily briefings, tasks, projects, and calendar events. Built with Next.js, TypeScript, and SQLite.
 
-## Executar localmente
+## Run locally
 
-Requer Node.js 24 ou superior.
+Requires Node.js 24 or later.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Abra http://127.0.0.1:3000/prototype. O servidor escuta apenas no computador local.
+Open http://127.0.0.1:3000/prototype. The server listens on the local computer only. The application interface is in Brazilian Portuguese.
 
-## Funcionalidades
+## Features
 
-- Tarefas com notas, checklist, datas, prazos, Hoje, Upcoming e Logbook.
-- Áreas, projetos e Algum dia.
-- Recorrências diárias, semanais e mensais, com ajuste para o último dia disponível em meses curtos.
-- Briefings por data com histórico e salvamento automático.
-- Compromissos manuais e Google Agenda por endereço secreto iCal, somente leitura, com Hoje e Amanhã.
+- Tasks with notes, checklists, planned dates, deadlines, Today, Upcoming, and a Logbook.
+- Areas, projects, and Someday lists.
+- Daily, weekly, and monthly recurrence. Monthly tasks use the last available day in shorter months while preserving their original day for subsequent months.
+- Daily briefings with history and automatic saving.
+- Manual appointments and read-only Google Calendar access through a secret iCal address, with Today and Tomorrow views.
 
-Veja [como configurar a agenda](docs/GOOGLE_CALENDAR.md).
+See the [calendar setup guide](docs/GOOGLE_CALENDAR.md).
 
-## Dados locais
+## Local data
 
-O banco e a chave de criptografia ficam em `data/`, fora do Git. Arquivos `.env` também não são publicados. Novas instalações usam dados de demonstração. O aplicativo ainda não tem autenticação: mantenha o acesso restrito ao computador até preparar a hospedagem.
+The database and encryption key are stored in `data/`, which is excluded from Git. Local `.env` files are excluded as well. New installations include demonstration data.
 
-## Verificação
+Authentication is not implemented yet. Keep the application restricted to your own computer until hosting and authentication are prepared. Backup and restore are planned features.
+
+## Validation
 
 ```sh
 npm test
@@ -35,4 +37,8 @@ npm run typecheck
 npm run build
 ```
 
-Backup/restauração e hospedagem são etapas futuras.
+Tests use temporary databases and simulated calendar responses.
+
+## Repository language
+
+Use English for repository documentation, technical comments, issue and pull request descriptions, and commit messages. User-facing application text remains in Brazilian Portuguese.
