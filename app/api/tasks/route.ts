@@ -2,12 +2,13 @@ import { requireSession } from '../../../lib/auth.ts';
 import { taskStore } from '../../../lib/server-tasks';
 import { TaskInputError } from '../../../lib/task-store';
 import { mutationOriginError } from '../../../lib/request-origin';
+import { localDay } from '../../../lib/task-dates.ts';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request){
  const authResponse = await requireSession(request);
  if (authResponse) return authResponse;
- try { const store = taskStore(); try { return Response.json(store.list()); } finally { store.close(); } }
+ try { const store = taskStore(); try { store.materializeSchedules(localDay()); return Response.json(store.list()); } finally { store.close(); } }
  catch { return Response.json({error:'Não foi possível carregar suas tarefas.'}, {status:500}); }
 }
 export async function POST(request: Request){

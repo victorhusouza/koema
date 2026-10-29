@@ -24,3 +24,8 @@ test('empty and unmatched queries return no results', () => {
  assert.deepEqual(searchWorkspace('  ', tasks, projects), []);
  assert.deepEqual(searchWorkspace('inexistente', tasks, projects), []);
 });
+
+test('unassigned projects have a readable context', () => {
+ const unassigned = { ...projects[0], areaId: null, areaName: null };
+ assert.equal(searchWorkspace('proposta', [], [unassigned])[0].context, 'Sem área');
+});

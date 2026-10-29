@@ -18,14 +18,19 @@ Create the single owner in an interactive terminal, then open http://127.0.0.1:3
 
 - Tasks with notes, checklists, planned dates, deadlines, Today, Upcoming, and a Logbook.
 - Case- and accent-insensitive search across saved task and project titles, including completed records.
-- Areas, projects, and Someday lists, with labeled create/edit forms and manual project completion.
+- Areas, optional-area projects with notes and dates, ordered project headings, hierarchical tags, and Someday lists, with labeled create/edit forms and manual project completion.
 - Daily, weekdays, weekends, weekly, and monthly recurrence. Monthly tasks use the last available day in shorter months while preserving their original day for subsequent months.
+- Separate recurring templates with fixed-calendar or after-completion rules, custom selectors, intervals, and pause controls.
 - Daily briefings with history and automatic saving.
 - Manual appointments and read-only Google Calendar access through a secret iCal address, with Today and Tomorrow views.
 
 See the [calendar setup guide](docs/GOOGLE_CALENDAR.md).
 
 See [authentication and owner recovery](docs/AUTHENTICATION.md) before hosting. Koema has no public registration or setup page; first owner setup and password recovery run only in an interactive SSH or local terminal.
+
+Koema can be installed as a PWA. Optional Web Push reminders require explicit notification permission, server keys, and a separately deployed scheduler. See [notification setup](docs/NOTIFICATIONS.md). The service worker does not cache private data for offline access.
+
+See [Things import readiness](docs/THINGS-READINESS.md) for supported structures and the agreed list mapping. Preparing these structures does not import a source database.
 
 See the [future hosting plan](docs/HOSTING-PLAN.md) for an unapproved deployment outline. It does not provision infrastructure or transfer data.
 

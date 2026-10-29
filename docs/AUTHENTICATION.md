@@ -30,16 +30,17 @@ Keep a protected, current copy of the SQLite database before owner recovery. Res
 
 Set `KOEMA_PUBLIC_ORIGIN` to the exact canonical HTTPS origin, for example `https://koema.souzareis.me`. Browser mutation Origin checks use this value instead of the internal loopback HTTP URL and ignore forwarded host/protocol headers. The listener must remain private on loopback.
 
-Nginx must overwrite proxy headers and never append client-controlled values for the single address header:
+Caddy must overwrite the single client-address header before forwarding to the private application listener:
 
-```nginx
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
+```caddyfile
+koema.souzareis.me {
+    reverse_proxy 127.0.0.1:3000 {
+        header_up X-Real-IP {remote_host}
+    }
+}
 ```
 
-Only set `KOEMA_TRUST_PROXY=1` if this exact reverse-proxy policy is active. Then login throttling uses both a global key and Nginx's overwritten `X-Real-IP`; otherwise all clients share the global 15-minute limiter. This global limit bounds storage and hashing work but means five failed attempts can temporarily block another legitimate login. Failed credentials share one response; the rate-limit response is 429.
+Only set `KOEMA_TRUST_PROXY=1` if this reverse-proxy policy is active and the app remains on loopback. Then login throttling uses both a global key and the overwritten `X-Real-IP`; otherwise all clients share the global 15-minute limiter. This global limit bounds storage and hashing work but means five failed attempts can temporarily block another legitimate login. Failed credentials share one response; the rate-limit response is 429.
 
 Production cookies are host-only, `HttpOnly`, `Secure`, `SameSite=Lax`, and scoped to `/`. The login endpoint caps JSON at 4 KiB, and scrypt work is asynchronous and limited to two concurrent derivations per process. All existing data, calendar, backup, and auth mutation routes require a valid server-side session. The proxy redirect is only a navigation convenience; the page and each data handler verify the session themselves.
 

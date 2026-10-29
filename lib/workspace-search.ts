@@ -25,7 +25,7 @@ export function searchWorkspace(query: string, tasks: Task[], projects: Project[
    id: project.id,
    title: project.name,
    completed: project.status === 'completed',
-   context: project.areaName,
+   context: project.areaName || 'Sem área',
   })),
  ];
 }

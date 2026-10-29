@@ -24,6 +24,30 @@ function makeDaily(store: ReturnType<typeof openTaskStore>, plannedDate = '2026-
  return store.update(task.id, { recurrence: 'daily' } as never)!;
 }
 
+/** Rebuilds the v6 physical schema before setting a historical user_version. */
+function downgradeV7Database(db:DatabaseSync,version:4|5){
+ db.exec('PRAGMA foreign_keys=OFF;BEGIN IMMEDIATE;');
+ try{
+  db.exec(`DROP INDEX IF EXISTS tasks_schedule_occurrence;DROP INDEX IF EXISTS tasks_heading_id;
+   DROP INDEX IF EXISTS headings_project_position;DROP INDEX IF EXISTS tags_shortcut;DROP INDEX IF EXISTS projects_area_name;DROP INDEX IF EXISTS areas_source_id;
+   DROP TABLE IF EXISTS headings;DROP TABLE IF EXISTS tags;DROP TABLE IF EXISTS recurring_schedules;DROP TABLE IF EXISTS schedule_materializer_state;
+   CREATE TABLE projects_legacy(id INTEGER PRIMARY KEY AUTOINCREMENT,area_id INTEGER NOT NULL REFERENCES areas(id),name TEXT NOT NULL COLLATE NOCASE,status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed')),completed_at TEXT,UNIQUE(area_id,name));
+   INSERT INTO projects_legacy(id,area_id,name,status,completed_at) SELECT id,area_id,name,status,completed_at FROM projects;
+   DROP TABLE projects;ALTER TABLE projects_legacy RENAME TO projects;
+   CREATE TABLE areas_legacy(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL COLLATE NOCASE UNIQUE);
+   INSERT INTO areas_legacy(id,name) SELECT id,name FROM areas;
+   DROP TABLE areas;ALTER TABLE areas_legacy RENAME TO areas;`);
+  const rows=db.prepare('SELECT id,body FROM tasks').all() as {id:number;body:string}[];
+  for(const row of rows){
+   const task=JSON.parse(row.body) as Record<string,unknown>;
+   for(const field of ['tagIds','effectiveTagIds','reminderAt','headingId','createdAt','updatedAt','scheduleId','scheduledFor','sourceId'])delete task[field];
+   if(version===4)delete task.recurrenceAnchor;
+   db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(task),row.id);
+  }
+  db.exec(`PRAGMA user_version=${version};COMMIT;PRAGMA foreign_keys=ON;`);
+ }catch(error){db.exec('ROLLBACK;PRAGMA foreign_keys=ON;');throw error;}
+}
+
 test('completion skips missed days, resets checklist, persists, and is idempotent', () => {
  const directory = mkdtempSync(join(tmpdir(), 'painel-recurrence-'));
  const path = join(directory, 'test.sqlite');
@@ -316,7 +340,7 @@ test('migration refreshes daily successor fingerprints without changing existing
  try{
   const first=makeDaily(store,'2026-10-30');const successor=store.complete(first.id)!.find(task=>task.id!==first.id)!;const completed=store.list().find(task=>task.id===first.id)!;store.close();
   const db=new DatabaseSync(path);const oldSnapshot={title:successor.title,project:successor.project,when:successor.when,plannedDate:successor.plannedDate??null,deadline:successor.deadline??null,notes:successor.notes,checklist:successor.checklist,recurrence:successor.recurrence??null};
-  db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify({...completed,successorSnapshot:JSON.stringify(oldSnapshot)}),first.id);db.exec('PRAGMA user_version=4');db.close();
+  db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify({...completed,successorSnapshot:JSON.stringify(oldSnapshot)}),first.id);downgradeV7Database(db,4);db.close();
   store=openTaskStore(path,{now:fixedNow});const reopened=store.reopen(first.id)!;assert.equal(reopened.find(task=>task.id===first.id)?.done,false);assert.equal(reopened.some(task=>task.id===successor.id),false);store.close();
  }finally{try{store.close();}catch{}rmSync(directory,{recursive:true,force:true});}
 });
@@ -338,7 +362,7 @@ test('v4 weekly and monthly series migrate anchors and can reopen migrated succe
    db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(parent),id);
    db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(successor),parent.successorId);
   }
-  db.exec('PRAGMA user_version=4');db.close();
+  downgradeV7Database(db,4);db.close();
   store=openTaskStore(path,{now:()=>new Date('2026-02-01T16:00:00.000Z')});
   for(const {id,recurrence} of predecessors){
    const parent=store.get(id)!;const successor=store.get(parent.successorId!)!;
@@ -363,7 +387,7 @@ test('v5 fingerprint migration preserves pre-existing successor edits for confir
   const oldSnapshot={title:successor.title,project:successor.project,when:successor.when,plannedDate:successor.plannedDate??null,deadline:successor.deadline??null,notes:successor.notes,checklist:successor.checklist,recurrence:successor.recurrence??null,recurrenceAnchor:successor.recurrenceAnchor??null,areaId:successor.areaId??null,projectId:successor.projectId??null};
   db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify({...parent,successorSnapshot:JSON.stringify(oldSnapshot)}),task.id);
   store.update(successor.id,{areaId:destination.id});store.close();
-  db.exec('PRAGMA user_version=5');db.close();
+  downgradeV7Database(db,5);db.close();
   store=openTaskStore(path,{now:fixedNow});
   assert.throws(()=>store.reopen(task.id),(error:unknown)=>error instanceof RecurrenceConflictError&&error.code==='edited-successor');
  }finally{try{store.close();}catch{}rmSync(directory,{recursive:true,force:true});}

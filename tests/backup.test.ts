@@ -34,7 +34,7 @@ test('portable snapshot preserves WAL-backed domains and excludes calendar secre
   source.close();
   const result = await createPortableBackup(f.path, f.directory);
   for (const marker of ['SECRET_URL_FIXTURE', 'SECRET_TOKEN_FIXTURE', 'CIPHERTEXT_SECRET_FIXTURE']) assert.ok(!result.bytes.includes(Buffer.from(marker)));
-  assert.deepEqual(result.info.counts, { tasks: 14, areas: 3, projects: 2, briefings: 2, manualEvents: 1 });
+  assert.deepEqual(result.info.counts, { tasks: 14, areas: 3, projects: 2, briefings: 2, manualEvents: 1, headings:0, tags:0, schedules:0 });
   // Read the returned portable image through a private temporary file.
   const snapshotPath = join(f.directory, 'export.sqlite'); writeFileSync(snapshotPath, result.bytes);
   const copy = new DatabaseSync(snapshotPath);
@@ -42,6 +42,7 @@ test('portable snapshot preserves WAL-backed domains and excludes calendar secre
   assert.ok(!names.includes('google_calendar_metadata'));
   assert.ok(names.includes('briefing_metadata'));
   assert.ok(names.includes('manual_event_metadata'));
+  assert.ok(names.includes('headings'));assert.ok(names.includes('tags'));assert.ok(names.includes('recurring_schedules'));assert.ok(names.includes('schedule_materializer_state'));
   assert.equal((copy.prepare("SELECT value FROM koema_backup_metadata WHERE key='format_version'").get() as {value:string}).value, '1');
   copy.close();
  } finally { rmSync(f.directory, { recursive: true, force: true }); }
@@ -85,6 +86,62 @@ test('restore verifies a separate staged copy and leaves the active database unc
   const { readdirSync } = await import('node:fs'); const stage = join(f.directory, 'restored-backups');
   assert.equal(readdirSync(stage).filter(name => name.endsWith('.sqlite')).length, 1);
  } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test('restore accepts a compatible v6 backup with its original schema and metadata',async()=>{
+ const f=fixture();const legacyPath=join(f.directory,'legacy-v6.sqlite');
+ try{
+  const db=new DatabaseSync(legacyPath);db.exec(`CREATE TABLE tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,body TEXT NOT NULL);
+   CREATE TABLE areas(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL COLLATE NOCASE UNIQUE);
+   CREATE TABLE projects(id INTEGER PRIMARY KEY AUTOINCREMENT,area_id INTEGER NOT NULL REFERENCES areas(id),name TEXT NOT NULL COLLATE NOCASE,status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed')),completed_at TEXT,UNIQUE(area_id,name));
+   CREATE TABLE koema_backup_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);PRAGMA user_version=6;`);
+  db.prepare('INSERT INTO areas(name) VALUES (?)').run('Legacy');db.prepare('INSERT INTO projects(area_id,name) VALUES (1,?)').run('Project');
+  db.prepare('INSERT INTO tasks(body) VALUES (?)').run(JSON.stringify({title:'Legacy task',done:false,when:'Caixa de entrada',checklist:[]}));
+  const info={createdAt:'2026-10-01T00:00:00.000Z',appVersion:'0.1.0',schemaVersion:6,counts:{tasks:1,areas:1,projects:1,briefings:0,manualEvents:0}};
+  db.prepare('INSERT INTO koema_backup_metadata(key,value) VALUES (?,?)').run('format_version','1');db.prepare('INSERT INTO koema_backup_metadata(key,value) VALUES (?,?)').run('backup_info',JSON.stringify(info));db.close();
+  const restored=await restoreToSeparateDatabase(readFileSync(legacyPath),f.path);assert.equal(restored.info.schemaVersion,6);assert.deepEqual(restored.info.counts,info.counts);
+ }finally{rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('v7 backup preserves tags, headings, and recurrence templates while removing notification secrets',async()=>{
+ const f=fixture();
+ try{
+  const store=openTaskStore(f.path);const tag=store.createTag({name:'Imported',shortcut:'I'});const project=store.projects()[0];const heading=store.createHeading({projectId:project.id,title:''});
+  const schedule=store.createSchedule({title:'Template',notes:'Notes',checklist:[],areaId:project.areaId,projectId:project.id,headingId:heading.id,tagIds:[tag.id],deadlineOffset:2,reminderTime:'08:15',rule:{mode:'calendar',unit:'week',interval:1,anchorDate:'2026-10-28'}});store.close();
+  const raw=new DatabaseSync(f.path);raw.exec("CREATE TABLE push_subscriptions(id TEXT PRIMARY KEY,secret TEXT);INSERT INTO push_subscriptions VALUES ('test','PUSH_DELIVERY_SECRET');");
+  raw.prepare('UPDATE areas SET source_id=? WHERE id=?').run('things:area:1',project.areaId);
+  raw.prepare('UPDATE projects SET source_id=? WHERE id=?').run('things:project:1',project.id);
+  raw.prepare('UPDATE tags SET source_id=? WHERE id=?').run('things:tag:1',tag.id);
+  raw.prepare('UPDATE headings SET source_id=? WHERE id=?').run('things:heading:1',heading.id);
+  const taskRow=raw.prepare('SELECT id,body FROM tasks ORDER BY id LIMIT 1').get() as {id:number;body:string};const taskBody=JSON.parse(taskRow.body);taskBody.sourceId='things:task:1';raw.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(taskBody),taskRow.id);
+  const scheduleRow=raw.prepare('SELECT body FROM recurring_schedules WHERE id=?').get(schedule.id) as {body:string};const scheduleBody=JSON.parse(scheduleRow.body);scheduleBody.sourceId='things:repeat:1';raw.prepare('UPDATE recurring_schedules SET body=? WHERE id=?').run(JSON.stringify(scheduleBody),schedule.id);raw.close();
+  const exported=await createPortableBackup(f.path,f.directory);assert.equal(exported.info.counts.tags,1);assert.equal(exported.info.counts.headings,1);assert.equal(exported.info.counts.schedules,1);assert.ok(!exported.bytes.includes(Buffer.from('PUSH_DELIVERY_SECRET')));
+  const restored=await restoreToSeparateDatabase(exported.bytes,f.path);assert.equal(restored.info.counts.tags,1);
+  const stage=join(f.directory,'restored-backups');const path=join(stage,(await import('node:fs')).readdirSync(stage).find(name=>name.endsWith('.sqlite'))!);const copy=new DatabaseSync(path);
+  try{assert.equal((copy.prepare('SELECT title,source_id AS sourceId FROM headings WHERE id=?').get(heading.id) as {title:string;sourceId:string}).sourceId,'things:heading:1');assert.equal((copy.prepare('SELECT source_id FROM areas WHERE id=?').get(project.areaId) as {source_id:string}).source_id,'things:area:1');assert.equal((copy.prepare('SELECT source_id FROM projects WHERE id=?').get(project.id) as {source_id:string}).source_id,'things:project:1');assert.equal((copy.prepare('SELECT source_id FROM tags WHERE id=?').get(tag.id) as {source_id:string}).source_id,'things:tag:1');const task=JSON.parse((copy.prepare('SELECT body FROM tasks WHERE id=?').get(taskRow.id) as {body:string}).body);assert.equal(task.sourceId,'things:task:1');const saved=JSON.parse((copy.prepare('SELECT body FROM recurring_schedules WHERE id=?').get(schedule.id) as {body:string}).body);assert.deepEqual(saved.tagIds,[tag.id]);assert.equal(saved.headingId,heading.id);assert.equal(saved.sourceId,'things:repeat:1');assert.equal((copy.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='push_subscriptions'").get()),undefined);}finally{copy.close();}
+ }finally{rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('restore detects duplicated imported IDs even if an uploaded copy removed its indexes',async()=>{
+ const f=fixture();
+ try{
+  const store=openTaskStore(f.path);
+  const scheduleInput={title:'Imported schedule',notes:'',checklist:[],areaId:null,projectId:null,headingId:null,tagIds:[],deadlineOffset:null,reminderTime:null,rule:{mode:'after-completion',unit:'day',interval:1,anchorDate:'2026-10-28'}};
+  const firstSchedule=store.createSchedule(scheduleInput);const secondSchedule=store.createSchedule({...scheduleInput,title:'Other imported schedule'});store.close();
+  const exported=await createPortableBackup(f.path,f.directory);
+  for(const entity of ['task','schedule'] as const){
+   const corruptedPath=join(f.directory,`duplicate-${entity}-source.sqlite`);writeFileSync(corruptedPath,exported.bytes);const db=new DatabaseSync(corruptedPath);
+   db.exec('DROP INDEX tasks_source_id;DROP INDEX recurring_schedules_source_id;');
+   if(entity==='task'){
+    const rows=db.prepare('SELECT id,body FROM tasks ORDER BY id LIMIT 2').all() as {id:number;body:string}[];
+    for(const row of rows){const body=JSON.parse(row.body);body.sourceId='things:duplicate-task';db.prepare('UPDATE tasks SET body=? WHERE id=?').run(JSON.stringify(body),row.id);}
+   }else{
+    const rows=db.prepare('SELECT id,body FROM recurring_schedules WHERE id IN (?,?)').all(firstSchedule.id,secondSchedule.id) as {id:number;body:string}[];
+    for(const row of rows){const body=JSON.parse(row.body);body.sourceId='things:duplicate-repeat';db.prepare('UPDATE recurring_schedules SET body=? WHERE id=?').run(JSON.stringify(body),row.id);}
+   }
+   db.close();await assert.rejects(()=>restoreToSeparateDatabase(readFileSync(corruptedPath),f.path),/identificador de origem inválido ou duplicado/);
+  }
+ }finally{rmSync(f.directory,{recursive:true,force:true});}
 });
 
 test('restore rejects damaged, oversized, unknown-schema and secret-bearing files', async () => {

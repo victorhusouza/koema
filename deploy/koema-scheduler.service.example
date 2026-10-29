@@ -1,0 +1,26 @@
+[Unit]
+Description=Koema schedule materialization and Web Push scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=koema
+Group=koema
+WorkingDirectory=/opt/koema/current
+Environment=PATH=/opt/nodejs/bin:/usr/bin:/bin
+EnvironmentFile=/etc/koema/koema.env
+ExecStart=/opt/nodejs/bin/node --experimental-strip-types /opt/koema/current/scripts/run-scheduler.ts
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+StateDirectory=koema
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/koema
+
+[Install]
+WantedBy=multi-user.target

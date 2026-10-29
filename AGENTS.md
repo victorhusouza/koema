@@ -11,3 +11,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Commit authorship
 
 For commits created by the coding agent, use command-scoped identity overrides: `git -c user.name=codex-ai-agent -c user.email=codex-ai-agent@users.noreply.github.com commit ...`. Preserve the human user's repository and global Git identity settings so their own commits remain distinguishable. Use English commit messages. Existing commits retain their authorship unless the user requests rewriting them.
+
+## Commit and push review
+
+Before creating a commit or pushing changes, present the proposed English title and descriptive body, including changes and validation, for the user's review. Commit and push only after the user approves that text.
