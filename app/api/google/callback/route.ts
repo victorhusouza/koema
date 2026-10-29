@@ -1,3 +1,4 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { clearStateCookie, cookieValue, exchangeCode, googleConfig, openGoogleStore, redirectResponse, STATE_COOKIE, stateMatches } from '../../../../lib/google-calendar.ts';
 import { openIcalStore } from '../../../../lib/google-ical.ts';
 export const runtime = 'nodejs'; export const dynamic = 'force-dynamic';
@@ -5,7 +6,9 @@ function finish(url: URL, status: string, secure: boolean) {
  const target = new URL('/prototype', url.origin); target.searchParams.set('google_calendar', status);
  return redirectResponse(target, clearStateCookie(secure));
 }
-export async function GET(request: Request) {
+export async function GET(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const url = new URL(request.url); const config = googleConfig();
  if (!config) return finish(url, 'unconfigured', false);
  const secure = new URL(config.redirectUri).protocol === 'https:';

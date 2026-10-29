@@ -1,3 +1,4 @@
+import { requireSession } from '../../../../../lib/auth.ts';
 import { taskStore } from '../../../../../lib/server-tasks';
 import { RecurrenceConflictError, TaskInputError } from '../../../../../lib/task-store';
 import { mutationOriginError } from '../../../../../lib/request-origin';
@@ -5,7 +6,9 @@ import { mutationOriginError } from '../../../../../lib/request-origin';
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: Context) {
+export async function POST(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const rejected=mutationOriginError(request); if(rejected)return rejected;
  const { id } = await context.params;
  if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) return Response.json({error:'Tarefa inválida.'},{status:400});

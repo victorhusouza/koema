@@ -8,6 +8,7 @@ import { accessToken, dayBounds, GOOGLE_SCOPE, googleConfig, listGoogleEvents, m
 import { GET as googleCallback } from '../app/api/google/callback/route.ts';
 import { GET as googleConnect } from '../app/api/google/connect/route.ts';
 import { POST as googleDisconnect } from '../app/api/google/disconnect/route.ts';
+import { testSession } from './auth-fixture.ts';
 
 function fixture() {
  const dir = mkdtempSync(join(tmpdir(), 'painel-google-'));
@@ -30,12 +31,14 @@ test('state is random, bound to cookie and rejected when missing, mismatched, or
 test('OAuth denial with a valid state returns to the panel as cancelled without saving a connection', async () => {
  const env = { GOOGLE_CLIENT_ID:process.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET:process.env.GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI:process.env.GOOGLE_REDIRECT_URI };
  const now = Date.now(); const state = makeState(now);
+ const dir=mkdtempSync(join(tmpdir(),'koema-google-denial-'));const previous=process.env.PAINEL_DB_PATH;process.env.PAINEL_DB_PATH=join(dir,'panel.sqlite');const session=testSession(process.env.PAINEL_DB_PATH);
  process.env.GOOGLE_CLIENT_ID='mock-client'; process.env.GOOGLE_CLIENT_SECRET='mock-secret'; process.env.GOOGLE_REDIRECT_URI='http://127.0.0.1:3000/api/google/callback';
  try {
-  const req = new Request(`http://127.0.0.1:3000/api/google/callback?error=access_denied&state=${state.value}`,{headers:{cookie:`painel_google_oauth_state=${state.value}; painel_google_oauth_state_expires=${state.expires}`}});
+  const req = new Request(`http://127.0.0.1:3000/api/google/callback?error=access_denied&state=${state.value}`,{headers:{cookie:`koema_session=${session.token}; painel_google_oauth_state=${state.value}; painel_google_oauth_state_expires=${state.expires}`}});
   const response = await googleCallback(req); assert.equal(new URL(response.headers.get('location')!).searchParams.get('google_calendar'),'cancelled'); assert.match(response.headers.get('set-cookie') || '',/Max-Age=0/);
-  const invalid = await googleCallback(new Request(`http://127.0.0.1:3000/api/google/callback?error=access_denied&state=${state.value}`)); assert.equal(new URL(invalid.headers.get('location')!).searchParams.get('google_calendar'),'error');
+  const invalid = await googleCallback(new Request(`http://127.0.0.1:3000/api/google/callback?error=access_denied&state=${state.value}`,{headers:{cookie:`koema_session=${session.token}`}})); assert.equal(new URL(invalid.headers.get('location')!).searchParams.get('google_calendar'),'error');
  } finally {
+  if(previous===undefined)delete process.env.PAINEL_DB_PATH;else process.env.PAINEL_DB_PATH=previous;rmSync(dir,{recursive:true,force:true});
   for (const [key,value] of Object.entries({GOOGLE_CLIENT_ID:env.GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET:env.GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI:env.GOOGLE_REDIRECT_URI})) { if (value===undefined) delete process.env[key]; else process.env[key]=value; }
  }
 });
@@ -45,13 +48,14 @@ test('OAuth connect and callback routes set state cookies and persist only after
  const keys=['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI','GOOGLE_TOKEN_ENCRYPTION_KEY','PAINEL_DB_PATH'] as const;
  const env=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
  process.env.GOOGLE_CLIENT_ID='mock-client'; process.env.GOOGLE_CLIENT_SECRET='mock-secret'; process.env.GOOGLE_REDIRECT_URI='http://127.0.0.1:3000/api/google/callback'; process.env.GOOGLE_TOKEN_ENCRYPTION_KEY=Buffer.alloc(32,7).toString('base64'); process.env.PAINEL_DB_PATH=join(dir,'panel.sqlite');
+ const session=testSession(process.env.PAINEL_DB_PATH);
  const originalFetch=globalThis.fetch;
  try {
-  const start=await googleConnect(new Request('http://127.0.0.1:3000/api/google/connect'));
+  const start=await googleConnect(new Request('http://127.0.0.1:3000/api/google/connect',{headers:{cookie:`koema_session=${session.token}`}}));
   assert.equal(start.status,302); const auth=new URL(start.headers.get('location')!); assert.equal(auth.origin,'https://accounts.google.com'); assert.equal(auth.searchParams.get('scope'),GOOGLE_SCOPE);
   const cookies=start.headers.getSetCookie(); assert.equal(cookies.length,2); assert.match(cookies[0],/HttpOnly; SameSite=Lax/); const state=cookies[0].match(/painel_google_oauth_state=([a-f0-9]{64})/)![1]; const expires=cookies[1].match(/state_expires=(\d+)/)![1];
   globalThis.fetch=async () => json({access_token:'access-new',refresh_token:'refresh-new',expires_in:3600,scope:GOOGLE_SCOPE});
-  const response=await googleCallback(new Request(`http://127.0.0.1:3000/api/google/callback?code=mock-code&state=${state}`,{headers:{cookie:`painel_google_oauth_state=${state}; painel_google_oauth_state_expires=${expires}`}}));
+  const response=await googleCallback(new Request(`http://127.0.0.1:3000/api/google/callback?code=mock-code&state=${state}`,{headers:{cookie:`koema_session=${session.token}; painel_google_oauth_state=${state}; painel_google_oauth_state_expires=${expires}`}}));
   assert.equal(new URL(response.headers.get('location')!).searchParams.get('google_calendar'),'connected'); assert.equal(response.headers.getSetCookie().length,2);
   const store=openGoogleStore({clientId:'mock-client',clientSecret:'mock-secret',redirectUri:'http://127.0.0.1:3000/api/google/callback',dbPath:join(dir,'panel.sqlite'),encryptionKey:Buffer.alloc(32,7).toString('base64')});
   try { assert.equal(store.read()?.refreshToken,'refresh-new'); } finally { store.close(); }
@@ -116,10 +120,11 @@ test('disconnect mutation accepts only the configured local origin', () => {
 test('disconnect revokes remotely when possible and always removes local tokens', async () => {
  const dir=mkdtempSync(join(tmpdir(),'painel-google-disconnect-')); const keys=['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI','GOOGLE_TOKEN_ENCRYPTION_KEY','PAINEL_DB_PATH'] as const; const env=Object.fromEntries(keys.map(key=>[key,process.env[key]])); const originalFetch=globalThis.fetch;
  process.env.GOOGLE_CLIENT_ID='mock-client';process.env.GOOGLE_CLIENT_SECRET='mock-secret';process.env.GOOGLE_REDIRECT_URI='http://127.0.0.1:3000/api/google/callback';process.env.GOOGLE_TOKEN_ENCRYPTION_KEY=Buffer.alloc(32,8).toString('base64');process.env.PAINEL_DB_PATH=join(dir,'panel.sqlite');
+ const session=testSession(process.env.PAINEL_DB_PATH);
  try {
   const config=googleConfig()!; const store=openGoogleStore(config);store.save({accessToken:'a',refreshToken:'r',expiresAt:Date.now()+50000,scope:GOOGLE_SCOPE});store.close();
   globalThis.fetch=async (_input,init)=>{assert.equal(new URLSearchParams(String(init?.body)).get('token'),'r');return new Response(null,{status:200});};
-  const response=await googleDisconnect(new Request('http://127.0.0.1:3000/api/google/disconnect',{method:'POST',headers:{origin:'http://127.0.0.1:3000'}})); const result=await response.json(); assert.equal(result.revoked,true); assert.equal(result.connected,false);
+  const response=await googleDisconnect(new Request('http://127.0.0.1:3000/api/google/disconnect',{method:'POST',headers:{cookie:`koema_session=${session.token}`,origin:'http://127.0.0.1:3000'}})); const result=await response.json(); assert.equal(result.revoked,true); assert.equal(result.connected,false);
   const check=openGoogleStore(config);try{assert.equal(check.hasTokens(),false);}finally{check.close();}
  } finally {globalThis.fetch=originalFetch;rmSync(dir,{recursive:true,force:true});for(const key of keys){const value=env[key];if(value===undefined)delete process.env[key];else process.env[key]=value;}}
 });

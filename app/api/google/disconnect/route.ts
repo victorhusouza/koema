@@ -1,7 +1,10 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { googleConfig, openGoogleStore, originAllowed, revokeGoogle } from '../../../../lib/google-calendar.ts';
 import { openIcalStore } from '../../../../lib/google-ical.ts';
 export const runtime = 'nodejs'; export const dynamic = 'force-dynamic';
-export async function POST(request: Request) {
+export async function POST(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const config = googleConfig(); if (!config) return Response.json({ error: 'A conexão do Google ainda não foi configurada.' }, { status: 503 });
  if (!originAllowed(request, config)) return Response.json({ error: 'Não foi possível confirmar a origem da solicitação.' }, { status: 403 });
  try {

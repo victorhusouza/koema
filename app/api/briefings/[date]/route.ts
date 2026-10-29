@@ -1,3 +1,4 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { join } from 'node:path';
 import { openBriefStore } from '../../../../lib/brief-store.ts';
 import { BriefingInputError, validateBriefingInput, validBriefingDate } from '../../../../lib/briefing.ts';
@@ -7,7 +8,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ date: string }> };
 function store() { return openBriefStore(process.env.PAINEL_DB_PATH || join(process.cwd(), 'data', 'painel.sqlite')); }
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const { date } = await context.params;
  if (!validBriefingDate(date)) return Response.json({ error: 'Data inválida. Use o formato AAAA-MM-DD.' }, { status: 400 });
  try {
@@ -16,7 +19,9 @@ export async function GET(_request: Request, context: Context) {
  } catch { return Response.json({ error: 'Não foi possível carregar o briefing.' }, { status: 500 }); }
 }
 
-export async function PUT(request: Request, context: Context) {
+export async function PUT(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const rejected=mutationOriginError(request); if(rejected)return rejected;
  const { date } = await context.params;
  if (!validBriefingDate(date)) return Response.json({ error: 'Data inválida. Use o formato AAAA-MM-DD.' }, { status: 400 });

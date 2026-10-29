@@ -1,3 +1,4 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { join } from 'node:path';
 import { openEventStore } from '../../../../lib/event-store.ts';
 import { EventInputError } from '../../../../lib/events.ts';
@@ -9,7 +10,9 @@ const store = () => openEventStore(process.env.PAINEL_DB_PATH || join(process.cw
 type Context = { params: Promise<{ id: string }> };
 function parseId(value: string): number | undefined { const id = Number(value); return Number.isSafeInteger(id) && id > 0 ? id : undefined; }
 
-export async function PATCH(request: Request, context: Context) {
+export async function PATCH(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const rejected = eventMutationError(request);
  if (rejected) return rejected;
  const id = parseId((await context.params).id); if (!id) return Response.json({ error: 'Compromisso não encontrado.' }, { status: 404 });
@@ -21,8 +24,10 @@ export async function PATCH(request: Request, context: Context) {
  }
 }
 
-export async function DELETE(_request: Request, context: Context) {
- const rejected = eventMutationError(_request, false);
+export async function DELETE(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
+ const rejected = eventMutationError(request, false);
  if (rejected) return rejected;
  const id = parseId((await context.params).id); if (!id) return Response.json({ error: 'Compromisso não encontrado.' }, { status: 404 });
  try { const db = store(); try { return db.remove(id) ? Response.json({ deleted: true }) : Response.json({ error: 'Compromisso não encontrado.' }, { status: 404 }); } finally { db.close(); } }

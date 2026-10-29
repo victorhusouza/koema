@@ -1,6 +1,9 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { googleConfig, GoogleCalendarError, listGoogleEvents, openGoogleStore } from '../../../../lib/google-calendar.ts';
 export const runtime = 'nodejs'; export const dynamic = 'force-dynamic';
-export async function GET(request: Request) {
+export async function GET(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const date = new URL(request.url).searchParams.get('date'); if (!date) return Response.json({ error: 'Informe a data para consultar a agenda.' }, { status: 400 });
  const config = googleConfig(); if (!config) return Response.json({ status: 'unconfigured', events: [] }, { headers: { 'Cache-Control': 'no-store' } });
  try {

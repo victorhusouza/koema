@@ -2,12 +2,15 @@
   "name": "koema",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "owner:init": "node --experimental-strip-types scripts/owner-init.ts",
+    "owner:reset": "node --experimental-strip-types scripts/owner-reset.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

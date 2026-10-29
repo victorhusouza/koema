@@ -4,13 +4,15 @@ export function sameOrigin(request: Request): boolean {
  if (!origin) return true;
  try {
   const supplied = new URL(origin);
-  const target = new URL(request.url);
-  const host = request.headers.get('host') || target.host;
-  if ((supplied.protocol !== 'http:' && supplied.protocol !== 'https:') || supplied.username || supplied.password || supplied.pathname !== '/' || supplied.search || supplied.hash) return false;
-  const expected = new URL(`${target.protocol}//${host}`);
-  return (expected.protocol === 'http:' || expected.protocol === 'https:') && supplied.origin === expected.origin;
+  const configured = process.env.KOEMA_PUBLIC_ORIGIN;
+  const expected = configured ? new URL(configured) : new URL(request.url);
+  if (configured && (expected.protocol !== 'https:' || expected.origin !== configured || expected.pathname !== '/' || expected.search || expected.hash)) return false;
+  if (!configured) expected.host = request.headers.get('host') || expected.host;
+  return (supplied.protocol === 'http:' || supplied.protocol === 'https:') && !supplied.username && !supplied.password && supplied.pathname === '/' && !supplied.search && !supplied.hash && supplied.origin === expected.origin;
  } catch { return false; }
 }
+
+export function strictMutationOriginAllowed(request: Request): boolean { return !!request.headers.get('origin') && sameOrigin(request); }
 
 /** Require and validate Origin before a browser-facing mutation is parsed or run. */
 export function mutationOriginError(request: Request, headers?: HeadersInit): Response | undefined {

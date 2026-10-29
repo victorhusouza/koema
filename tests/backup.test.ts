@@ -9,6 +9,7 @@ import { openTaskStore } from '../lib/task-store.ts';
 import { openBriefStore } from '../lib/brief-store.ts';
 import { openEventStore } from '../lib/event-store.ts';
 import { POST as backupPost } from '../app/api/backup/route.ts';
+import { testSession } from './auth-fixture.ts';
 
 function fixture() {
  const directory = mkdtempSync(join(tmpdir(), 'koema-backup-test-'));
@@ -41,6 +42,30 @@ test('portable snapshot preserves WAL-backed domains and excludes calendar secre
   assert.ok(names.includes('manual_event_metadata'));
   assert.equal((copy.prepare("SELECT value FROM koema_backup_metadata WHERE key='format_version'").get() as {value:string}).value, '1');
   copy.close();
+ } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test('portable exports strip owner credentials and sessions; restore keeps identity out', async () => {
+ const f = fixture();
+ try {
+  const session = testSession(f.path);
+  const source = new DatabaseSync(f.path);
+  source.prepare('UPDATE koema_owner SET password_hash=?,password_salt=? WHERE id=1').run('OWNER_HASH_MARKER', 'OWNER_SALT_MARKER');
+  source.prepare('INSERT INTO koema_sessions(token_hash,owner_id,created_at,expires_at,absolute_expires_at,last_seen_at) VALUES (\'SESSION_HASH_MARKER\',1,1,2,3,1)').run();
+  source.close();
+  const exported = await createPortableBackup(f.path, f.directory);
+  for (const marker of ['OWNER_HASH_MARKER', 'OWNER_SALT_MARKER', 'SESSION_HASH_MARKER', session.token]) {
+   assert.ok(!exported.bytes.includes(Buffer.from(marker)), `backup contained ${marker}`);
+  }
+  const restored = await restoreToSeparateDatabase(exported.bytes, f.path);
+  const restoredDirectory = join(f.directory, 'restored-backups');
+  const restoredName = (await import('node:fs')).readdirSync(restoredDirectory).find(name => name.endsWith('.sqlite'))!;
+  const copy = new DatabaseSync(join(restoredDirectory, restoredName));
+  try {
+   const names = (copy.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {name:string}[]).map(row => row.name);
+   assert.ok(!names.some(name => ['koema_owner', 'koema_sessions', 'koema_login_attempts'].includes(name)));
+   assert.equal(restored.info.counts.tasks, exported.info.counts.tasks);
+  } finally { copy.close(); }
  } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
 
@@ -80,20 +105,21 @@ test('upload ignores client filenames and enforces origin and multipart content 
  const previous = process.env.PAINEL_DB_PATH;
  process.env.PAINEL_DB_PATH = f.path;
  try {
+  const session=testSession(f.path);const auth={cookie:`koema_session=${session.token}`};
   const portable = (await createPortableBackup(f.path, f.directory)).bytes;
-  const denied = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { host: '127.0.0.1:3000', 'content-type': 'application/json' }, body: '{}' }));
+  const denied = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { ...auth,host: '127.0.0.1:3000', 'content-type': 'application/json' }, body: '{}' }));
   assert.equal(denied.status, 403);
-  const exported = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'application/json' }, body: '{}' }));
+  const exported = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { ...auth,host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'application/json' }, body: '{}' }));
   assert.equal(exported.status, 200);
   assert.ok(Buffer.from(await exported.arrayBuffer()).subarray(0, 16).equals(Buffer.from('SQLite format 3\0')));
-  const wrongType = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'text/plain' }, body: '{}' }));
+  const wrongType = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { ...auth,host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'text/plain' }, body: '{}' }));
   assert.equal(wrongType.status, 415);
   let generated = 0;
   const oversizedBody = new ReadableStream<Uint8Array>({ pull(controller) { if (generated++ >= 65) controller.close(); else controller.enqueue(new Uint8Array(1024 * 1024)); } });
-  const oversized = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'multipart/form-data; boundary=unused', 'content-length': '1' }, body: oversizedBody, duplex: 'half' } as RequestInit & { duplex: 'half' }));
+  const oversized = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { ...auth,host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-type': 'multipart/form-data; boundary=unused', 'content-length': '1' }, body: oversizedBody, duplex: 'half' } as RequestInit & { duplex: 'half' }));
   assert.equal(oversized.status, 413);
   const form = new FormData(); form.set('backup', new File([new Uint8Array(portable)], '../../active.sqlite'));
-  const restored = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-length': String(portable.length + 1024) }, body: form }));
+  const restored = await backupPost(new Request('http://127.0.0.1:3000/api/backup', { method: 'POST', headers: { ...auth,host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'content-length': String(portable.length + 1024) }, body: form }));
   assert.equal(restored.status, 200);
   const stageNames = (await import('node:fs')).readdirSync(join(f.directory, 'restored-backups'));
   assert.equal(stageNames.length, 1);

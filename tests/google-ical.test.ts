@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { GoogleCalendarError } from '../lib/google-calendar.ts';
 import { listIcalEvents, openIcalStore, validateGoogleIcalUrl } from '../lib/google-ical.ts';
+import { testSession } from './auth-fixture.ts';
 
 const url = 'https://calendar.google.com/calendar/ical/account%40gmail.com/private-secret-token/basic.ics';
 const calendar = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:daily@example.test\r\nDTSTAMP:20261026T120000Z\r\nDTSTART;TZID=America/Belem:20261027T090000\r\nDTEND;TZID=America/Belem:20261027T100000\r\nRRULE:FREQ=DAILY;COUNT=4\r\nEXDATE;TZID=America/Belem:20261028T090000\r\nSUMMARY:Reunião diária\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:daily@example.test\r\nDTSTAMP:20261026T120000Z\r\nRECURRENCE-ID;TZID=America/Belem:20261029T090000\r\nDTSTART;TZID=America/Belem:20261028T110000\r\nDTEND;TZID=America/Belem:20261028T120000\r\nSUMMARY:Reunião reagendada\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:daily@example.test\r\nDTSTAMP:20261026T120000Z\r\nRECURRENCE-ID;TZID=America/Belem:20261030T090000\r\nDTSTART;TZID=America/Belem:20261030T090000\r\nDTEND;TZID=America/Belem:20261030T100000\r\nSTATUS:CANCELLED\r\nSUMMARY:Reunião cancelada\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day@example.test\r\nDTSTAMP:20261026T120000Z\r\nDTSTART;VALUE=DATE:20261028\r\nDTEND;VALUE=DATE:20261029\r\nSUMMARY:Dia reservado\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
@@ -84,14 +85,15 @@ test('removing the iCal address clears the active source and exposes no secret',
  process.env.PAINEL_DB_PATH = join(dir, 'panel.sqlite');
  process.env.GOOGLE_TOKEN_KEY_FILE = join(dir, '.calendar.key');
  try {
+  const session=testSession(process.env.PAINEL_DB_PATH);const headers={Cookie:`koema_session=${session.token}`};
   const { POST, GET, DELETE } = await import('../app/api/calendar-feed/route.ts');
-  const response = await POST(new Request('http://localhost/api/calendar-feed', { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }));
+  const response = await POST(new Request('http://localhost/api/calendar-feed', { method: 'POST', headers: { ...headers, Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }));
   assert.equal(response.status, 200);
-  const status = await (await GET()).json();
+  const status = await (await GET(new Request('http://localhost/api/calendar-feed',{headers}))).json();
   assert.equal(status.source, 'ical');
   assert.equal(JSON.stringify(status).includes('private-secret-token'), false);
-  assert.equal((await DELETE(new Request('http://localhost/api/calendar-feed', { method: 'DELETE', headers: { Origin: 'http://localhost' } }))).status, 200);
-  const disconnected = await (await GET()).json();
+  assert.equal((await DELETE(new Request('http://localhost/api/calendar-feed', { method: 'DELETE', headers: { ...headers, Origin: 'http://localhost' } }))).status, 200);
+  const disconnected = await (await GET(new Request('http://localhost/api/calendar-feed',{headers}))).json();
   assert.equal(disconnected.source, null);
   assert.equal(disconnected.configured, false);
  } finally {

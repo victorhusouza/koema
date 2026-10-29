@@ -1,9 +1,12 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { mutationOriginError } from '../../../../lib/request-origin.ts';
 import { googleConfig, openGoogleStore } from '../../../../lib/google-calendar.ts';
 import { openIcalStore } from '../../../../lib/google-ical.ts';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function POST(request: Request) {
+export async function POST(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const rejected=mutationOriginError(request); if(rejected)return rejected;
  try {
   const { source } = await request.json() as { source?: unknown };

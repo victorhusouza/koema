@@ -1,3 +1,4 @@
+import { requireSession } from '../../../lib/auth.ts';
 import { join } from 'node:path';
 import { createPortableBackup, MAX_BACKUP_BYTES, restoreToSeparateDatabase } from '../../../lib/backup.ts';
 import { localDateKey } from '../../../lib/dates.ts';
@@ -31,7 +32,9 @@ async function exportBackup() {
  } catch (error) { return Response.json({ error: friendly(error) }, { status: 500, headers: noStore }); }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const invalid = requestError(request);
  if (invalid) return invalid;
  const contentType = request.headers.get('content-type') || '';

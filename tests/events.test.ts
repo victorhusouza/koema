@@ -10,6 +10,7 @@ import { openTaskStore } from '../lib/task-store.ts';
 import { openBriefStore } from '../lib/brief-store.ts';
 import { POST } from '../app/api/events/route.ts';
 import { PATCH, DELETE } from '../app/api/events/[id]/route.ts';
+import { testSession } from './auth-fixture.ts';
 
 test('manual events create, edit, filter by date, order all-day first, delete, and persist after reopen', () => {
  const dir=mkdtempSync(join(tmpdir(),'painel-events-')); const path=join(dir,'test.sqlite');
@@ -53,7 +54,7 @@ test('invalid event values are rejected without changing stored event', () => {
 
 test('event mutation routes enforce same-origin JSON and preserve local host aliases', async () => {
  const dir=mkdtempSync(join(tmpdir(),'painel-event-routes-')); const previous=process.env.PAINEL_DB_PATH; process.env.PAINEL_DB_PATH=join(dir,'test.sqlite');
- const sameOrigin={Host:'127.0.0.1:3000',Origin:'http://127.0.0.1:3000'};
+ const session=testSession(process.env.PAINEL_DB_PATH);const sameOrigin={Host:'127.0.0.1:3000',Origin:'http://127.0.0.1:3000',Cookie:`koema_session=${session.token}`};
  const json={...sameOrigin,'Content-Type':'application/json; charset=utf-8'};
  const body=JSON.stringify({title:'Consulta',date:'2026-10-28',time:'11:30'});
  try {
@@ -62,7 +63,7 @@ test('event mutation routes enforce same-origin JSON and preserve local host ali
    new Request('http://localhost:3000/api/events',{method:'POST',headers:{...sameOrigin,'Content-Type':'text/plain'},body}),
    new Request('http://localhost:3000/api/events',{method:'POST',headers:json,body:'{' }),
   ]) assert.ok([400,403,415].includes((await POST(request)).status));
-  assert.equal((await POST(new Request('http://localhost:3000/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body}))).status,403);
+  assert.equal((await POST(new Request('http://localhost:3000/api/events',{method:'POST',headers:{Cookie:`koema_session=${session.token}`,'Content-Type':'application/json'},body}))).status,403);
   const created=await POST(new Request('http://localhost:3000/api/events',{method:'POST',headers:json,body}));
   assert.equal(created.status,201);
   const event=await created.json();
@@ -74,7 +75,7 @@ test('event mutation routes enforce same-origin JSON and preserve local host ali
   }
   const patchNoJson=await PATCH(new Request(`http://localhost:3000/api/events/${event.id}`,{method:'PATCH',headers:sameOrigin,body}),{params:Promise.resolve({id:String(event.id)})});
   assert.equal(patchNoJson.status,415);
-  assert.equal((await DELETE(new Request(`http://localhost:3000/api/events/${event.id}`,{method:'DELETE'}),{params:Promise.resolve({id:String(event.id)})})).status,403);
+  assert.equal((await DELETE(new Request(`http://localhost:3000/api/events/${event.id}`,{method:'DELETE',headers:{Cookie:`koema_session=${session.token}`}}),{params:Promise.resolve({id:String(event.id)})})).status,403);
   const changed=await PATCH(new Request(`http://localhost:3000/api/events/${event.id}`,{method:'PATCH',headers:json,body:JSON.stringify({title:'Consulta alterada',date:'2026-10-28',time:'11:30'})}),{params:Promise.resolve({id:String(event.id)})});
   assert.equal(changed.status,200);
   const deleted=await DELETE(new Request(`http://localhost:3000/api/events/${event.id}`,{method:'DELETE',headers:sameOrigin}),{params:Promise.resolve({id:String(event.id)})});

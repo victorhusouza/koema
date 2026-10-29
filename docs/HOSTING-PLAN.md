@@ -11,7 +11,7 @@
 
 ## Access and network boundary
 
-- Require authentication before exposing personal data. The existing same-origin checks are a request-forgery safeguard, not login. Choose and review the authentication method before public access.
+- Require the implemented native single-owner authentication before exposing personal data. The existing same-origin checks remain a request-forgery safeguard. See [AUTHENTICATION.md](AUTHENTICATION.md) for the SSH-only owner setup, recovery, session policy, and reverse-proxy origin configuration.
 - Restrict network ingress to the approved HTTPS entry point and a narrowly scoped administration path. Keep direct access to the Next.js listener private to the VM. Use an OCI Network Security Group or equivalent reviewed network controls; do not open an unapproved management endpoint. [OCI Network Security Groups](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/networksecuritygroups.htm)
 - The visible Google Calendar integration is the secret iCal feed, not OAuth. Keep its URL private and stored only in the protected local database. The planned server must be able to reach Google's calendar feed endpoint over HTTPS; OAuth client credentials are not required for this user-facing path. No live calendar URL or credential has been supplied or tested for this plan.
 - Store any deployment-only secrets outside Git and restrict them to the Koema process. Do not copy `.env` files, OAuth credentials, or the local calendar encryption key into a public image, source tree, logs, or backup archive. If the calendar key is not migrated, the user reconnects the iCal feed after cutover.
@@ -36,7 +36,7 @@
 1. OCI region and tenancy/compartment that may contain this personal data.
 2. Exact flexible shape and CPU architecture after checking regional capacity and Node 24 compatibility.
 3. Linux image, domain, approved public and upstream ports, and whether access is private-only or public behind authentication.
-4. Authentication method and administrator recovery path.
+4. Confirm the native single-owner authentication and SSH-only administrator recovery path in `AUTHENTICATION.md`.
 5. Durable volume size, backup schedule/retention, where the encrypted off-host copy is held, and restore ownership.
 6. Whether to migrate the current local database or start with a fresh server database. A migration requires an explicit data-transfer and cutover approval.
 

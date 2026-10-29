@@ -1,3 +1,4 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { taskStore } from '../../../../lib/server-tasks';
 import { RecurrenceConflictError, TaskInputError } from '../../../../lib/task-store';
 import { mutationOriginError } from '../../../../lib/request-origin';
@@ -16,5 +17,9 @@ async function mutate(request: Request, context: Context, remove: boolean) {
   return Response.json({error:error instanceof TaskInputError ? error.message : 'Não foi possível salvar a alteração.'},{status:error instanceof TaskInputError || error instanceof SyntaxError ? 400 : 500});
  }
 }
-export async function PATCH(request: Request, context: Context) {return mutate(request,context,false);}
-export async function DELETE(request: Request, context: Context) {return mutate(request,context,true);}
+export async function PATCH(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;return mutate(request,context,false);}
+export async function DELETE(request: Request, context: Context){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;return mutate(request,context,true);}

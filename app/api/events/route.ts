@@ -1,3 +1,4 @@
+import { requireSession } from '../../../lib/auth.ts';
 import { join } from 'node:path';
 import { openEventStore } from '../../../lib/event-store.ts';
 import { EventInputError } from '../../../lib/events.ts';
@@ -7,7 +8,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const store = () => openEventStore(process.env.PAINEL_DB_PATH || join(process.cwd(), 'data', 'painel.sqlite'));
 
-export async function GET(request: Request) {
+export async function GET(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  try {
   const date = new URL(request.url).searchParams.get('date');
   if (!date) return Response.json({ error: 'Informe a data para consultar os compromissos.' }, { status: 400 });
@@ -18,7 +21,9 @@ export async function GET(request: Request) {
  }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const rejected = eventMutationError(request);
  if (rejected) return rejected;
  try {

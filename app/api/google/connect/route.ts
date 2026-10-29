@@ -1,6 +1,9 @@
+import { requireSession } from '../../../../lib/auth.ts';
 import { authorizationUrl, googleConfig, makeState, redirectResponse } from '../../../../lib/google-calendar.ts';
 export const runtime = 'nodejs'; export const dynamic = 'force-dynamic';
-export async function GET(request: Request) {
+export async function GET(request: Request){
+ const authResponse = await requireSession(request);
+ if (authResponse) return authResponse;
  const config = googleConfig();
  if (!config) return redirectResponse(new URL('/prototype?google_calendar=unconfigured', request.url));
  try {
