@@ -54,12 +54,16 @@ test('areas and projects keep stable task links through renames and project comp
   const legacy=store.list().find(task=>task.title==='Preparar a proposta do novo projeto')!;
   assert.equal(legacy.areaName,'Trabalho');assert.equal(legacy.projectName,'Proposta comercial');
   const area=store.createArea({name:'saúde'});const project=store.createProject({name:'dentista',areaId:area.id});
+  assert.equal(store.createArea({name:'iPhone suporte'}).name,'iPhone suporte');
+  assert.equal(store.createProject({name:'eBay vendas',areaId:area.id}).name,'eBay vendas');
   const task=store.create({title:'marcar consulta',when:'Hoje',areaId:area.id,projectId:project.id});
   assert.equal(task.areaId,area.id);assert.equal(task.projectId,project.id);assert.equal(task.project,'Saúde · Dentista');
   assert.throws(()=>store.setProjectStatus(project.id,'completed'),TaskInputError);
   store.updateArea(area.id,{name:'Bem-estar'});store.updateProject(project.id,{name:'Consulta anual',areaId:area.id});
   assert.equal(store.list().find(item=>item.id===task.id)?.project,'Bem-estar · Consulta anual');
   store.update(task.id,{done:true});assert.equal(store.setProjectStatus(project.id,'completed')?.status,'completed');
+  const laterTask=store.create({title:'acompanhar consulta',areaId:area.id,projectId:project.id});
+  assert.equal(laterTask.projectId,project.id);assert.equal(store.projects().find(item=>item.id===project.id)?.status,'completed');
   assert.equal(store.setProjectStatus(project.id,'open')?.status,'open');
   store.update(task.id,{done:false});store.update(task.id,{areaId:null,projectId:null});
   const someday=store.create({title:'ideia sem prazo',when:'Algum dia'});store.close();
