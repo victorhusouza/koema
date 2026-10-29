@@ -50,6 +50,18 @@ function monthlyNext(anchor: string, after: string): string {
  }
  throw new TaskInputError('Não foi possível calcular a próxima data mensal.');
 }
+function isEligibleWeekday(recurrence: 'weekdays' | 'weekends', date: string): boolean {
+ const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
+ return recurrence==='weekdays' ? weekday>=1&&weekday<=5 : weekday===0||weekday===6;
+}
+function normalizeWeekdayDate(recurrence: 'weekdays' | 'weekends', date: string): string {
+ let candidate=date;
+ while(!isEligibleWeekday(recurrence,candidate))candidate=addDays(candidate,1);
+ return candidate;
+}
+function nextWeekdayOccurrence(recurrence: 'weekdays' | 'weekends', after: string): string {
+ return normalizeWeekdayDate(recurrence,addDays(after,1));
+}
 
 export function openTaskStore(path: string, options: StoreOptions = {}) {
  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -193,7 +205,7 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
    result.checklist = value.checklist.map(c => ({text: capitalizeInitial(c.text), done: c.done}));
   }
   if ('recurrence' in value) {
-   if (value.recurrence !== null && value.recurrence !== 'daily' && value.recurrence !== 'weekly' && value.recurrence !== 'monthly') throw new TaskInputError('Escolha Sem repetição, Diária, Semanal ou Mensal.');
+   if (value.recurrence !== null && value.recurrence !== 'daily' && value.recurrence !== 'weekdays' && value.recurrence !== 'weekends' && value.recurrence !== 'weekly' && value.recurrence !== 'monthly') throw new TaskInputError('Escolha uma opção de repetição válida.');
    result.recurrence = value.recurrence;
   }
   for (const field of ['areaId','projectId'] as const) if (field in value) {
@@ -242,12 +254,16 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
  function applyPatch(previous: Task, patch: TaskPatch): Task {
   const task: Task = {...previous, ...patch};
   if (patch.when !== undefined && patch.plannedDate === undefined) task.plannedDate=legacyDate(patch.when,localDay(now()));
+  if (task.plannedDate && (task.recurrence==='weekdays'||task.recurrence==='weekends') && (patch.recurrence!==undefined||patch.plannedDate!==undefined||patch.when!==undefined)) {
+   task.plannedDate=normalizeWeekdayDate(task.recurrence,task.plannedDate);
+   if(patch.when!==undefined)task.when='Planejada';
+  }
   if (patch.plannedDate) task.when='Planejada';
   if (patch.plannedDate === null && task.when!=='Algum dia') task.when='Caixa de entrada';
   if (patch.when==='Algum dia') task.plannedDate=null;
   if ((patch.recurrence==='weekly'||patch.recurrence==='monthly') && previous.recurrence!==patch.recurrence) task.recurrenceAnchor=task.plannedDate||localDay(now());
-  if ((previous.recurrence==='weekly'||previous.recurrence==='monthly') && patch.plannedDate!==undefined && patch.plannedDate!==previous.plannedDate) task.recurrenceAnchor=patch.plannedDate||localDay(now());
-  if (patch.recurrence===null || patch.recurrence==='daily') delete task.recurrenceAnchor;
+  if ((previous.recurrence==='weekly'||previous.recurrence==='monthly') && (patch.plannedDate!==undefined||patch.when!==undefined) && task.plannedDate!==previous.plannedDate) task.recurrenceAnchor=task.plannedDate||localDay(now());
+  if (patch.recurrence!==undefined && patch.recurrence!=='weekly' && patch.recurrence!=='monthly') delete task.recurrenceAnchor;
   if (patch.recurrence) {
    task.seriesId = task.seriesId ?? task.id;
    task.occurrence = task.occurrence ?? 1;
@@ -265,11 +281,11 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
    const completedAt = now().toISOString();
    const contentChanges = {...changes}; delete contentChanges.done;
    const doneTask: Task = {...applyPatch(task, contentChanges), done:true, completed:completedAt};
-   if (doneTask.recurrence === 'daily' || doneTask.recurrence === 'weekly' || doneTask.recurrence === 'monthly') {
+   if (doneTask.recurrence === 'daily' || doneTask.recurrence === 'weekdays' || doneTask.recurrence === 'weekends' || doneTask.recurrence === 'weekly' || doneTask.recurrence === 'monthly') {
     const completedDay = localDay(new Date(completedAt));
     const baseDay = doneTask.plannedDate && doneTask.plannedDate > completedDay ? doneTask.plannedDate : completedDay;
     const anchor=doneTask.recurrenceAnchor||doneTask.plannedDate||completedDay;
-    const plannedDate = doneTask.recurrence==='daily' ? addDays(baseDay,1) : doneTask.recurrence==='weekly' ? weeklyNext(anchor,baseDay) : monthlyNext(anchor,baseDay);
+    const plannedDate = doneTask.recurrence==='daily' ? addDays(baseDay,1) : doneTask.recurrence==='weekdays'||doneTask.recurrence==='weekends' ? nextWeekdayOccurrence(doneTask.recurrence,baseDay) : doneTask.recurrence==='weekly' ? weeklyNext(anchor,baseDay) : monthlyNext(anchor,baseDay);
     const previousBase = doneTask.plannedDate || completedDay;
     const deadline = doneTask.deadline ? addDays(plannedDate, dayDistance(previousBase, doneTask.deadline)) : null;
     const next: Omit<Task, 'id'> = {
@@ -334,6 +350,7 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
    const task: Omit<Task, 'id'> = applyDestination({title:'', project:'', when:'Caixa de entrada', notes:'', checklist:[], deadline:null, ...patch, plannedDate:patch.plannedDate === undefined ? legacyDate(patch.when || '',localDay(now())) : patch.plannedDate, done:false} as Task,patch);
    if (task.when==='Algum dia') task.plannedDate=null;
    else if(task.plannedDate) task.when='Planejada';
+   if (task.plannedDate && (task.recurrence==='weekdays'||task.recurrence==='weekends')) task.plannedDate=normalizeWeekdayDate(task.recurrence,task.plannedDate);
    if ((task.recurrence==='weekly'||task.recurrence==='monthly')&&!task.recurrenceAnchor) task.recurrenceAnchor=task.plannedDate||localDay(now());
    db.exec('BEGIN IMMEDIATE');
    try {

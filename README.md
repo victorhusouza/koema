@@ -19,7 +19,7 @@ Create the single owner in an interactive terminal, then open http://127.0.0.1:3
 - Tasks with notes, checklists, planned dates, deadlines, Today, Upcoming, and a Logbook.
 - Case- and accent-insensitive search across saved task and project titles, including completed records.
 - Areas, projects, and Someday lists, with labeled create/edit forms and manual project completion.
-- Daily, weekly, and monthly recurrence. Monthly tasks use the last available day in shorter months while preserving their original day for subsequent months.
+- Daily, weekdays, weekends, weekly, and monthly recurrence. Monthly tasks use the last available day in shorter months while preserving their original day for subsequent months.
 - Daily briefings with history and automatic saving.
 - Manual appointments and read-only Google Calendar access through a secret iCal address, with Today and Tomorrow views.
 

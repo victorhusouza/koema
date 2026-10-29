@@ -14,7 +14,7 @@ export type Task = {
  notes: string;
  checklist: { text: string; done: boolean }[];
  completed?: string;
- recurrence?: 'daily' | 'weekly' | 'monthly' | null;
+ recurrence?: 'daily' | 'weekdays' | 'weekends' | 'weekly' | 'monthly' | null;
  recurrenceAnchor?: string;
  seriesId?: number;
  occurrence?: number;

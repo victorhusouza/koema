@@ -18,6 +18,8 @@ function fixture() {
  const area = tasks.createArea({ name: 'Teste' });
  const project = tasks.createProject({ areaId: area.id, name: 'Projeto fictício' });
  tasks.create({ title: 'Tarefa fictícia', when: 'Hoje', plannedDate: '2026-10-28', areaId: area.id, projectId: project.id, recurrence: 'weekly' });
+ tasks.create({ title: 'Tarefa de semana', when: 'Planejada', plannedDate: '2026-10-28', recurrence: 'weekdays' });
+ tasks.create({ title: 'Tarefa de fim de semana', when: 'Planejada', plannedDate: '2026-10-31', recurrence: 'weekends' });
  tasks.close();
  const brief = openBriefStore(path); brief.save('2026-10-28', { Hoje: 'Revisar', Pendências: 'Nenhuma', Semana: 'Planejar' }); brief.close();
  const events = openEventStore(path); events.create({ title: 'Compromisso fictício', date: '2026-10-28', time: '10:30' }); events.close();
@@ -32,7 +34,7 @@ test('portable snapshot preserves WAL-backed domains and excludes calendar secre
   source.close();
   const result = await createPortableBackup(f.path, f.directory);
   for (const marker of ['SECRET_URL_FIXTURE', 'SECRET_TOKEN_FIXTURE', 'CIPHERTEXT_SECRET_FIXTURE']) assert.ok(!result.bytes.includes(Buffer.from(marker)));
-  assert.deepEqual(result.info.counts, { tasks: 12, areas: 3, projects: 2, briefings: 2, manualEvents: 1 });
+  assert.deepEqual(result.info.counts, { tasks: 14, areas: 3, projects: 2, briefings: 2, manualEvents: 1 });
   // Read the returned portable image through a private temporary file.
   const snapshotPath = join(f.directory, 'export.sqlite'); writeFileSync(snapshotPath, result.bytes);
   const copy = new DatabaseSync(snapshotPath);
@@ -65,6 +67,8 @@ test('portable exports strip owner credentials and sessions; restore keeps ident
    const names = (copy.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {name:string}[]).map(row => row.name);
    assert.ok(!names.some(name => ['koema_owner', 'koema_sessions', 'koema_login_attempts'].includes(name)));
    assert.equal(restored.info.counts.tasks, exported.info.counts.tasks);
+   const recurrences=(copy.prepare("SELECT json_extract(body,'$.recurrence') AS recurrence FROM tasks WHERE json_extract(body,'$.recurrence') IN ('weekdays','weekends') ORDER BY recurrence").all() as {recurrence:string}[]).map(row=>row.recurrence);
+   assert.deepEqual(recurrences,['weekdays','weekends']);
   } finally { copy.close(); }
  } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
@@ -97,6 +101,9 @@ test('restore rejects damaged, oversized, unknown-schema and secret-bearing file
   const secret = join(f.directory, 'secret.sqlite'); writeFileSync(secret, good);
   const secretDb = new DatabaseSync(secret); secretDb.exec("CREATE TABLE google_calendar_metadata(key TEXT PRIMARY KEY,value TEXT)"); secretDb.close();
   await assert.rejects(() => restoreToSeparateDatabase(readFileSync(secret), f.path), /não reconhece/);
+  const invalidRecurrence = join(f.directory, 'invalid-recurrence.sqlite'); writeFileSync(invalidRecurrence, good);
+  const invalidDb = new DatabaseSync(invalidRecurrence); invalidDb.prepare("UPDATE tasks SET body=json_set(body,'$.recurrence','holidays') WHERE id=(SELECT MIN(id) FROM tasks)").run(); invalidDb.close();
+  await assert.rejects(() => restoreToSeparateDatabase(readFileSync(invalidRecurrence), f.path), /repetição inválida/);
  } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
 

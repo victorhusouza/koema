@@ -58,7 +58,7 @@ function validateRecords(db: DatabaseSync, present: Set<string>) {
   try { task = JSON.parse(row.body); } catch { throw new Error('O arquivo contém uma tarefa inválida.'); }
   if (!task || Array.isArray(task) || typeof task !== 'object' || typeof task.title !== 'string' || !task.title.trim() || typeof task.done !== 'boolean' || typeof task.when !== 'string' || !Array.isArray(task.checklist) || task.checklist.some(item => !item || typeof item.text !== 'string' || typeof item.done !== 'boolean')) throw new Error('O arquivo contém uma tarefa inválida.');
   if (task.plannedDate != null && !validDate(task.plannedDate) || task.deadline != null && !validDate(task.deadline)) throw new Error('O arquivo contém uma data de tarefa inválida.');
-  if (task.recurrence != null && !['daily','weekly','monthly'].includes(String(task.recurrence))) throw new Error('O arquivo contém uma repetição inválida.');
+  if (task.recurrence != null && !['daily','weekdays','weekends','weekly','monthly'].includes(String(task.recurrence))) throw new Error('O arquivo contém uma repetição inválida.');
   if (task.areaId != null && (!Number.isSafeInteger(task.areaId) || !areaIds.has(Number(task.areaId)))) throw new Error('Uma tarefa aponta para uma área inexistente.');
   if (task.projectId != null && (!Number.isSafeInteger(task.projectId) || !projects.has(Number(task.projectId)))) throw new Error('Uma tarefa aponta para um projeto inexistente.');
  }

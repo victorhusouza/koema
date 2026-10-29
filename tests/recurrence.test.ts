@@ -209,6 +209,62 @@ test('weekly recurrence keeps its weekday anchor and reanchors when planned date
  }finally{store.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+test('weekday and weekend recurrences normalize ineligible dates and skip missed periods',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'painel-weekday-weekend-'));let clock=new Date('2026-01-02T16:00:00.000Z');const store=freshStore(join(directory,'test.sqlite'),()=>clock);
+ try{
+  const weekdays=store.create({title:'Tarefa de semana',when:'Planejada',plannedDate:'2026-01-02',recurrence:'weekdays'}); // Friday
+  const fromThursday=store.create({title:'Outra tarefa de semana',when:'Planejada',plannedDate:'2026-01-01',recurrence:'weekdays'});
+  assert.equal(fromThursday.plannedDate,'2026-01-01');
+  const weekend=store.create({title:'Tarefa de fim de semana',when:'Planejada',plannedDate:'2026-01-02',recurrence:'weekends'}); // Friday rolls to Saturday
+  assert.equal(weekend.plannedDate,'2026-01-03');
+  const saturday=store.create({title:'Tarefa de segunda',when:'Planejada',plannedDate:'2026-01-03',recurrence:'weekdays'});
+  assert.equal(saturday.plannedDate,'2026-01-05');
+  const afterFriday=store.complete(weekdays.id)!.find(row=>row.id!==weekdays.id&&row.seriesId===weekdays.seriesId)!;
+  assert.equal(afterFriday.plannedDate,'2026-01-05');
+  const afterSaturday=store.complete(weekend.id)!.find(row=>row.id!==weekend.id&&row.seriesId===weekend.seriesId)!;
+  assert.equal(afterSaturday.plannedDate,'2026-01-04');
+  clock=new Date('2026-02-01T16:00:00.000Z');
+  const missedWeekday=store.complete(fromThursday.id)!.find(row=>row.id!==fromThursday.id&&row.seriesId===fromThursday.seriesId)!;
+  assert.equal(missedWeekday.plannedDate,'2026-02-02');
+  const missedWeekend=store.create({title:'Fim de semana com atraso',when:'Planejada',plannedDate:'2026-01-03',recurrence:'weekends'});
+  const later=store.complete(missedWeekend.id)!.find(row=>row.id!==missedWeekend.id&&row.seriesId===missedWeekend.seriesId)!;
+  assert.equal(later.plannedDate,'2026-02-07');
+  const future=store.create({title:'Série futura',when:'Planejada',plannedDate:'2026-02-09',recurrence:'weekdays'});
+  const nextFuture=store.complete(future.id)!.find(row=>row.id!==future.id&&row.seriesId===future.seriesId)!;
+  assert.equal(nextFuture.plannedDate,'2026-02-10');
+  const edited=store.create({title:'Reancorar fim de semana',when:'Planejada',plannedDate:'2026-01-03',recurrence:'weekends'});
+  store.update(edited.id,{plannedDate:'2026-01-08'});
+  assert.equal(store.get(edited.id)?.plannedDate,'2026-01-10');
+  const fromLegacyWhen=store.create({title:'Data por destino',when:'Planejada',plannedDate:'2026-01-02',recurrence:'weekdays'});
+  store.update(fromLegacyWhen.id,{when:'Amanhã'});
+  assert.equal(store.get(fromLegacyWhen.id)?.plannedDate,'2026-02-02');
+  const weekly=store.create({title:'Troca de frequência',when:'Planejada',plannedDate:'2026-01-02',recurrence:'weekly'});
+  assert.ok(store.get(weekly.id)?.recurrenceAnchor);
+  store.update(weekly.id,{recurrence:'weekdays'});
+  assert.equal(store.get(weekly.id)?.recurrenceAnchor,undefined);
+  const reopenable=store.create({title:'Reabrir fim de semana',when:'Planejada',plannedDate:'2026-02-07',recurrence:'weekends'});
+  const successor=store.complete(reopenable.id)!.find(row=>row.id!==reopenable.id&&row.seriesId===reopenable.seriesId)!;
+  store.update(successor.id,{title:'Sucessora editada'});
+  let confirmation!: {successorId:number;successorFingerprint:string};
+  assert.throws(()=>store.reopen(reopenable.id),(error:unknown)=>{if(!(error instanceof RecurrenceConflictError)||error.code!=='edited-successor')return false;confirmation={successorId:error.successorId!,successorFingerprint:error.successorFingerprint!};return true;});
+  const reopened=store.reopen(reopenable.id,confirmation)!;
+  assert.equal(reopened.find(row=>row.id===reopenable.id)?.done,false);
+  assert.equal(reopened.some(row=>row.id===successor.id),false);
+ }finally{store.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('task validation accepts weekday/weekend recurrence values and rejects unknown values',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'painel-recurrence-api-'));const path=join(directory,'test.sqlite');
+ try{
+  const store=freshStore(path);
+  const weekdays=store.create({title:'Tarefa via API',when:'Planejada',plannedDate:'2026-01-02',recurrence:'weekdays'});
+  const weekends=store.create({title:'Tarefa via API',when:'Planejada',plannedDate:'2026-01-03',recurrence:'weekends'});
+  assert.equal(weekdays.recurrence,'weekdays');assert.equal(weekends.recurrence,'weekends');
+  assert.throws(()=>store.create({title:'Repetição desconhecida',recurrence:'holidays'}),/opção de repetição válida/);
+  store.close();
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
 test('monthly recurrence clamps short months, restores anchor day, handles leap years, and skips missed periods',()=>{
  const directory=mkdtempSync(join(tmpdir(),'painel-monthly-'));let clock=new Date('2026-01-31T16:00:00.000Z');const store=openTaskStore(join(directory,'test.sqlite'),{now:()=>clock});
  try{
