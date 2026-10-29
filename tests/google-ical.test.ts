@@ -25,6 +25,8 @@ test('expands recurrence with exclusions and includes all-day events', async () 
  assert.equal(events.find(event => event.title === 'Dia reservado')?.date, '2026-10-28');
  const previousDay = await listIcalEvents(url, '2026-10-27', async () => new Response(calendar, { headers: { 'Content-Type': 'text/calendar' } }));
  assert.equal(previousDay.some(event => event.title === 'Dia reservado'), false, 'VALUE=DATE keeps the ICS day independent of host timezone');
+ const followingDay = await listIcalEvents(url, '2026-10-29', async () => new Response(calendar, { headers: { 'Content-Type': 'text/calendar' } }));
+ assert.equal(followingDay.some(event => event.title === 'Dia reservado'), false, 'VALUE=DATE is not shifted to the following day');
  const moved = events.find(event => event.title === 'Reunião reagendada');
  assert.equal(moved?.date, '2026-10-28');
  assert.equal(moved?.time, '11:00');
@@ -83,12 +85,12 @@ test('removing the iCal address clears the active source and exposes no secret',
  process.env.GOOGLE_TOKEN_KEY_FILE = join(dir, '.calendar.key');
  try {
   const { POST, GET, DELETE } = await import('../app/api/calendar-feed/route.ts');
-  const response = await POST(new Request('http://localhost/api/calendar-feed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }));
+  const response = await POST(new Request('http://localhost/api/calendar-feed', { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }));
   assert.equal(response.status, 200);
   const status = await (await GET()).json();
   assert.equal(status.source, 'ical');
   assert.equal(JSON.stringify(status).includes('private-secret-token'), false);
-  assert.equal((await DELETE(new Request('http://localhost/api/calendar-feed', { method: 'DELETE' }))).status, 200);
+  assert.equal((await DELETE(new Request('http://localhost/api/calendar-feed', { method: 'DELETE', headers: { Origin: 'http://localhost' } }))).status, 200);
   const disconnected = await (await GET()).json();
   assert.equal(disconnected.source, null);
   assert.equal(disconnected.configured, false);

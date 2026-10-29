@@ -1,4 +1,4 @@
-import { sameOrigin } from '../../../lib/request-origin.ts';
+import { mutationOriginError } from '../../../lib/request-origin.ts';
 import { GoogleCalendarError, googleConfig, openGoogleStore } from '../../../lib/google-calendar.ts';
 import { openIcalStore, validateGoogleIcalUrl } from '../../../lib/google-ical.ts';
 export const runtime = 'nodejs';
@@ -16,7 +16,7 @@ export async function GET() {
  catch { return Response.json({ error: 'Não foi possível verificar a configuração da agenda.' }, { status: 500, headers: noStore }); }
 }
 export async function POST(request: Request) {
- if (!sameOrigin(request)) return Response.json({ error: 'Origem da solicitação inválida.' }, { status: 403, headers: noStore });
+ const rejected=mutationOriginError(request,noStore); if(rejected)return rejected;
  try {
   const body = await request.json() as { url?: unknown };
   const url = validateGoogleIcalUrl(body.url);
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
  }
 }
 export async function DELETE(request: Request) {
- if (!sameOrigin(request)) return Response.json({ error: 'Origem da solicitação inválida.' }, { status: 403, headers: noStore });
+ const rejected=mutationOriginError(request,noStore); if(rejected)return rejected;
  try {
   const store = openIcalStore();
   try {

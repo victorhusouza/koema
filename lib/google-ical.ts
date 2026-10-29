@@ -1,10 +1,10 @@
 import ical, { type EventInstance, type VEvent } from 'node-ical';
 import { openCalendarFeedStore, GoogleCalendarError } from './google-calendar.ts';
 import { validDate } from './task-dates.ts';
+import { calendarDateTime, DEFAULT_CALENDAR_TIME_ZONE } from './calendar-time.ts';
 
 const MAX_ICS_BYTES = 2 * 1024 * 1024;
 const MAX_EVENTS = 5000;
-const TIME_ZONE = 'America/Belem';
 export type IcalEvent = { id: string; title: string; date: string; time: string | null; endTime: string | null; allDay: boolean; meetingUrl: string | null };
 export type FeedConfig = { dbPath: string; keyPath?: string; encryptionKey?: string };
 
@@ -57,16 +57,13 @@ async function fetchCalendarText(initialUrl: string, fetcher: typeof fetch): Pro
  throw new GoogleCalendarError('O Google Agenda redirecionou a consulta de forma inválida.', 'ical_redirect_error');
 }
 
-function localDateTime(date: Date, zone = TIME_ZONE) {
- const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
- const part = (type: string) => parts.find(item => item.type === type)?.value || '00';
- return { date: `${part('year')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}` };
-}
 function normalizeInstance(event: VEvent, instance: EventInstance): IcalEvent | null {
  const effectiveEvent = instance.event || event;
  if (effectiveEvent.status === 'CANCELLED' || !(instance.start instanceof Date) || !(instance.end instanceof Date)) return null;
- const start = instance.isFullDay ? { date: `${String(instance.start.getFullYear()).padStart(4, '0')}-${String(instance.start.getMonth() + 1).padStart(2, '0')}-${String(instance.start.getDate()).padStart(2, '0')}`, time: '00:00' } : localDateTime(instance.start);
- const end = localDateTime(instance.end);
+ const start = instance.isFullDay
+  ? { date: `${String(instance.start.getFullYear()).padStart(4, '0')}-${String(instance.start.getMonth() + 1).padStart(2, '0')}-${String(instance.start.getDate()).padStart(2, '0')}`, time: '00:00' }
+  : calendarDateTime(instance.start, DEFAULT_CALENDAR_TIME_ZONE);
+ const end = calendarDateTime(instance.end, DEFAULT_CALENDAR_TIME_ZONE);
  const title = typeof instance.summary === 'string' && instance.summary.trim() ? instance.summary.trim() : 'Evento sem título';
  let meetingUrl: string | null = null;
  const candidateUrl = effectiveEvent.url || event.url;

@@ -1,15 +1,12 @@
 import { taskStore } from '../../../../../lib/server-tasks';
 import { RecurrenceConflictError, TaskInputError } from '../../../../../lib/task-store';
+import { mutationOriginError } from '../../../../../lib/request-origin';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: Context) {
- const origin = request.headers.get('origin');
- if (origin) {
-  try { if (new URL(origin).host !== request.headers.get('host')) return Response.json({error:'Origem da solicitação não permitida.'},{status:403}); }
-  catch { return Response.json({error:'Origem da solicitação não permitida.'},{status:403}); }
- }
+ const rejected=mutationOriginError(request); if(rejected)return rejected;
  const { id } = await context.params;
  if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) return Response.json({error:'Tarefa inválida.'},{status:400});
  try {

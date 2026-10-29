@@ -1,20 +1,14 @@
 import { join } from 'node:path';
 import { createPortableBackup, MAX_BACKUP_BYTES, restoreToSeparateDatabase } from '../../../lib/backup.ts';
 import { localDateKey } from '../../../lib/dates.ts';
+import { mutationOriginError } from '../../../lib/request-origin.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'no-store, private', 'X-Content-Type-Options': 'nosniff' };
 function activePath() { return process.env.PAINEL_DB_PATH || join(process.cwd(), 'data', 'painel.sqlite'); }
 function requestError(request: Request, expectedType?: string): Response | undefined {
- const origin = request.headers.get('origin');
- if (!origin) return Response.json({ error: 'A origem da solicitação não foi informada.' }, { status: 403, headers: noStore });
- try {
-  const parsed = new URL(origin);
-  const target = new URL(request.url);
-  const host = request.headers.get('host') || target.host;
-  if (parsed.origin !== `${target.protocol}//${host}`) return Response.json({ error: 'Origem da solicitação não permitida.' }, { status: 403, headers: noStore });
- } catch { return Response.json({ error: 'Origem da solicitação inválida.' }, { status: 403, headers: noStore }); }
+ const originError=mutationOriginError(request,noStore); if(originError)return originError;
  if (expectedType && !new RegExp(`^${expectedType}(?:\\s*;|\\s*$)`, 'i').test(request.headers.get('content-type') || '')) {
   return Response.json({ error: 'Formato de envio inválido.' }, { status: 415, headers: noStore });
  }

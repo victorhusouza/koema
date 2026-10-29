@@ -16,6 +16,7 @@ Open http://127.0.0.1:3000/prototype. The server listens on the local computer o
 ## Features
 
 - Tasks with notes, checklists, planned dates, deadlines, Today, Upcoming, and a Logbook.
+- Case- and accent-insensitive search across saved task and project titles, including completed records.
 - Areas, projects, and Someday lists, with labeled create/edit forms and manual project completion.
 - Daily, weekly, and monthly recurrence. Monthly tasks use the last available day in shorter months while preserving their original day for subsequent months.
 - Daily briefings with history and automatic saving.
@@ -35,7 +36,7 @@ Open the navigation menu and choose **Backup e restauração**. Export downloads
 
 To verify a backup, select the exported file and choose **Verificar e salvar cópia separada**. Koema checks SQLite integrity and schema compatibility, then writes a uniquely named copy under `restored-backups` beside the active database. This verifies the backup and keeps it available for a deliberate manual recovery; it does not replace the active database. The panel reports the backup date, schema and app versions, and record counts. Files are limited to 64 MB and local requests require a matching browser origin.
 
-Keep exported files in protected storage. The feature does not encrypt backup files, switch the active database, or include Google Calendar secrets.
+Keep exported files in protected storage. The feature does not encrypt backup files, switch the active database, or include Google Calendar secrets. Browser mutations require a matching request origin; this does not replace authentication.
 
 Authentication is not implemented yet. Keep the application restricted to your own computer until hosting and authentication are prepared.
 

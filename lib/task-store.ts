@@ -163,7 +163,10 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
  } catch (error) { db.close(); throw error; }
 
- function list(): Task[] { return db.prepare('SELECT id, body FROM tasks ORDER BY id').all().map(row => hydrate({...JSON.parse(row.body as string), id: Number(row.id)})); }
+ function list(): Task[] {
+  const catalog=hydrationCatalog();
+  return db.prepare('SELECT id, body FROM tasks ORDER BY id').all().map(row => hydrate({...JSON.parse(row.body as string), id: Number(row.id)},catalog));
+ }
  function get(id: number): Task | undefined { const row = db.prepare('SELECT body FROM tasks WHERE id=?').get(id); return row ? hydrate({...JSON.parse(row.body as string), id}) : undefined; }
  function validate(input: unknown, partial = false): TaskPatch {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TaskInputError('Dados da tarefa inválidos.');
@@ -202,11 +205,11 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
 
  function areaRows(): Area[] { return db.prepare('SELECT id,name FROM areas ORDER BY name COLLATE NOCASE,id').all() as Area[]; }
  function projectRows(): Project[] { return db.prepare('SELECT p.id,p.area_id AS areaId,a.name AS areaName,p.name,p.status,p.completed_at AS completedAt FROM projects p JOIN areas a ON a.id=p.area_id ORDER BY a.name COLLATE NOCASE,p.name COLLATE NOCASE,p.id').all() as Project[]; }
- function hydrate(task: Task): Task {
-  const areas = areaRows(); const projects = projectRows();
-  const project = task.projectId ? projects.find(item => item.id === task.projectId) : undefined;
+ function hydrationCatalog() { return {areas:new Map(areaRows().map(area=>[area.id,area])),projects:new Map(projectRows().map(project=>[project.id,project]))}; }
+ function hydrate(task: Task,catalog=hydrationCatalog()): Task {
+  const project = task.projectId ? catalog.projects.get(task.projectId) : undefined;
   const areaId = project?.areaId ?? task.areaId ?? null;
-  const area = areas.find(item => item.id === areaId);
+  const area = areaId===null ? undefined : catalog.areas.get(areaId);
   return {...task, areaId, projectId:project?.id ?? null, areaName:area?.name, projectName:project?.name, project:project ? `${project.areaName} · ${project.name}` : area?.name ?? ''};
  }
  function applyDestination(task: Task, patch: TaskPatch): Task {

@@ -1,10 +1,10 @@
-import { sameOrigin } from '../../../../lib/request-origin.ts';
+import { mutationOriginError } from '../../../../lib/request-origin.ts';
 import { googleConfig, openGoogleStore } from '../../../../lib/google-calendar.ts';
 import { openIcalStore } from '../../../../lib/google-ical.ts';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
- if (!sameOrigin(request)) return Response.json({ error: 'Origem da solicitação inválida.' }, { status: 403 });
+ const rejected=mutationOriginError(request); if(rejected)return rejected;
  try {
   const { source } = await request.json() as { source?: unknown };
   if (source !== 'ical' && source !== 'oauth') return Response.json({ error: 'Escolha uma forma de conexão válida.' }, { status: 400 });

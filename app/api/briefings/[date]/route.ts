@@ -1,17 +1,12 @@
 import { join } from 'node:path';
 import { openBriefStore } from '../../../../lib/brief-store.ts';
 import { BriefingInputError, validateBriefingInput, validBriefingDate } from '../../../../lib/briefing.ts';
+import { mutationOriginError } from '../../../../lib/request-origin.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ date: string }> };
 function store() { return openBriefStore(process.env.PAINEL_DB_PATH || join(process.cwd(), 'data', 'painel.sqlite')); }
-function sameOrigin(request: Request): boolean {
- const origin = request.headers.get('origin');
- if (!origin) return true;
- try { return new URL(origin).host === request.headers.get('host'); } catch { return false; }
-}
-
 export async function GET(_request: Request, context: Context) {
  const { date } = await context.params;
  if (!validBriefingDate(date)) return Response.json({ error: 'Data inválida. Use o formato AAAA-MM-DD.' }, { status: 400 });
@@ -22,7 +17,7 @@ export async function GET(_request: Request, context: Context) {
 }
 
 export async function PUT(request: Request, context: Context) {
- if (!sameOrigin(request)) return Response.json({ error: 'Origem da solicitação não permitida.' }, { status: 403 });
+ const rejected=mutationOriginError(request); if(rejected)return rejected;
  const { date } = await context.params;
  if (!validBriefingDate(date)) return Response.json({ error: 'Data inválida. Use o formato AAAA-MM-DD.' }, { status: 400 });
  try {

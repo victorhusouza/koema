@@ -3,6 +3,7 @@ import { chmodSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { validDate } from './task-dates.ts';
+import { calendarDateTime } from './calendar-time.ts';
 
 export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
 export const STATE_COOKIE = 'painel_google_oauth_state';
@@ -41,16 +42,20 @@ function keyBytes(config: CalendarStorageConfig): Buffer {
  if (key.length !== 32) throw new GoogleCalendarError('A chave local de proteção da conexão está inválida.', 'key_invalid');
  return key;
 }
-function encrypt(value: GoogleTokens, config: GoogleConfig): string {
+function encryptStoredValue(value: string, config: CalendarStorageConfig): string {
  const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', keyBytes(config), iv);
- const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]);
+ const ciphertext = Buffer.concat([cipher.update(value), cipher.final()]);
  return [iv, cipher.getAuthTag(), ciphertext].map(part => part.toString('base64')).join('.');
 }
+function decryptStoredValue(value: string, config: CalendarStorageConfig): string {
+ const [iv, tag, ciphertext] = value.split('.').map(part => Buffer.from(part, 'base64'));
+ const decipher = createDecipheriv('aes-256-gcm', keyBytes(config), iv); decipher.setAuthTag(tag);
+ return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString();
+}
+function encrypt(value: GoogleTokens, config: GoogleConfig): string { return encryptStoredValue(JSON.stringify(value), config); }
 function decrypt(value: string, config: GoogleConfig): GoogleTokens {
  try {
-  const [iv, tag, ciphertext] = value.split('.').map(part => Buffer.from(part, 'base64'));
-  const decipher = createDecipheriv('aes-256-gcm', keyBytes(config), iv); decipher.setAuthTag(tag);
-  const parsed = JSON.parse(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString()) as GoogleTokens;
+  const parsed = JSON.parse(decryptStoredValue(value, config)) as GoogleTokens;
   if (typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string' || typeof parsed.expiresAt !== 'number') throw new Error('invalid');
   return parsed;
  } catch { throw new GoogleCalendarError('Não foi possível ler a conexão salva. Verifique a chave local de proteção.', 'token_storage_error'); }
@@ -85,15 +90,11 @@ export function openCalendarFeedStore(config: CalendarStorageConfig) {
   readUrl() {
    const row = get(); if (!row) return null;
    try {
-    const [iv, tag, ciphertext] = row.value.split('.').map(part => Buffer.from(part, 'base64'));
-    const decipher = createDecipheriv('aes-256-gcm', keyBytes(config), iv); decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString();
+    return decryptStoredValue(row.value, config);
    } catch { throw new GoogleCalendarError('Não foi possível ler a conexão salva. Verifique a chave local de proteção.', 'token_storage_error'); }
   },
   saveUrl(url: string) {
-   const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', keyBytes(config), iv);
-   const ciphertext = Buffer.concat([cipher.update(url), cipher.final()]);
-   const encrypted = [iv, cipher.getAuthTag(), ciphertext].map(part => part.toString('base64')).join('.');
+   const encrypted = encryptStoredValue(url, config);
    db.prepare("INSERT INTO google_calendar_metadata(key,value) VALUES ('ical_url',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(encrypted);
   },
   remove() { db.prepare("DELETE FROM google_calendar_metadata WHERE key='ical_url'").run(); },
@@ -161,11 +162,6 @@ export function dayBounds(date: string) {
  const next = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)) + 1)).toISOString().slice(0, 10);
  return { timeMin: `${date}T00:00:00-03:00`, timeMax: `${next}T00:00:00-03:00` };
 }
-function localParts(value: string): { date: string; time: string } {
- const date = new Date(value); const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Belem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
- const get = (type: string) => parts.find(part => part.type === type)?.value || '00';
- return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
-}
 function meetingLink(event: any): string | null {
  const candidates = [event.hangoutLink, ...(event.conferenceData?.entryPoints || []).filter((entry: any) => entry.entryPointType === 'video').map((entry: any) => entry.uri)];
  for (const candidate of candidates) { try { const url = new URL(candidate); if (url.protocol === 'https:') return url.toString(); } catch {} }
@@ -177,7 +173,7 @@ export function normalizeEvent(event: any): GoogleEvent | null {
  const allDay = typeof event.start?.date === 'string';
  if (allDay) return { id: event.id, title, date: event.start.date, time: null, endTime: null, allDay: true, meetingUrl: meetingLink(event) };
  if (typeof event.start?.dateTime !== 'string') return null;
- const start = localParts(event.start.dateTime); const end = typeof event.end?.dateTime === 'string' ? localParts(event.end.dateTime) : null;
+ const start = calendarDateTime(event.start.dateTime); const end = typeof event.end?.dateTime === 'string' ? calendarDateTime(event.end.dateTime) : null;
  return { id: event.id, title, date: start.date, time: start.time, endTime: end && end.date === start.date ? end.time : null, allDay: false, meetingUrl: meetingLink(event) };
 }
 export async function listGoogleEvents(config: GoogleConfig, store: ReturnType<typeof openGoogleStore>, date: string, fetcher: typeof fetch = fetch): Promise<GoogleEvent[]> {
