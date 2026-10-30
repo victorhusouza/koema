@@ -55,3 +55,24 @@ The focused tests use generated temporary keys, temporary SQLite databases, and 
 ```sh
 node --experimental-strip-types --test tests/notifications.test.ts tests/scheduler.test.ts
 ```
+
+## Scheduler readiness during deployment
+
+The scheduler supports execution through `/opt/koema/current`, including when that
+path is a symlink to a versioned release. The entrypoint compares canonical paths
+so Node's module resolution cannot silently skip the worker loop.
+
+After starting the service, run the readiness probe as the runtime user with the
+production database path. For example, from the release directory:
+
+```sh
+sudo -u koema env PAINEL_DB_PATH=/var/lib/koema/painel.sqlite \
+  /opt/nodejs/bin/node --experimental-strip-types scripts/check-scheduler.ts
+```
+
+The probe waits up to 30 seconds for a recent heartbeat. A missing database,
+missing scheduler table, empty state, or temporarily unreadable database means
+“not ready” while polling, without printing a SQLite stack trace. The probe opens
+existing databases read-only and never creates tables, runs migrations, restores
+data, or starts services. It exits with status 1 if readiness is not confirmed.
+Keep the dashboard in maintenance until the probe and authentication checks pass.

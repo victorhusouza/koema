@@ -12,7 +12,8 @@
     "owner:init": "node --experimental-strip-types scripts/owner-init.ts",
     "owner:reset": "node --experimental-strip-types scripts/owner-reset.ts",
     "notifications:keys": "node --experimental-strip-types scripts/generate-push-keys.ts",
-    "scheduler": "node --experimental-strip-types scripts/run-scheduler.ts"
+    "scheduler": "node --experimental-strip-types scripts/run-scheduler.ts",
+    "scheduler:check": "node --experimental-strip-types scripts/check-scheduler.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

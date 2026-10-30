@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { runSchedulerTick } from '../lib/scheduler.ts';
 
 let stopping = false;
@@ -34,6 +35,6 @@ export async function runSchedulerProcess() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   void runSchedulerProcess();
 }
