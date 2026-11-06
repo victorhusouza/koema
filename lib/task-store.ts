@@ -597,7 +597,9 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
    const schedule=validateSchedule(merged);
    db.exec('BEGIN IMMEDIATE');try{
     const hasOccurrences=Boolean(db.prepare("SELECT 1 FROM tasks WHERE json_extract(body,'$.scheduleId')=? LIMIT 1").get(id));
-    const cursor=schedule.rule.mode==='after-completion'&&hasOccurrences?null:schedule.nextOccurrenceDate;
+    const cursor=schedule.rule.mode==='after-completion'&&hasOccurrences?null:
+     schedule.rule.mode==='calendar'&&current.rule.paused&&!schedule.rule.paused&&schedule.nextOccurrenceDate===null
+      ?nextCalendarDate(schedule.rule,localDay(now()),true):schedule.nextOccurrenceDate;
     const updated={...schedule,id,nextOccurrenceDate:cursor,...(current.sourceId?{sourceId:current.sourceId}:{})};db.prepare('UPDATE recurring_schedules SET body=?,next_occurrence_date=? WHERE id=?').run(JSON.stringify(updated),cursor,id);
     if(current.rule.mode==='after-completion'&&current.rule.paused&&!schedule.rule.paused){
      const occurrences=list().filter(task=>task.scheduleId===id);
@@ -636,22 +638,23 @@ export function openTaskStore(path: string, options: StoreOptions = {}) {
       if(!exists){const first=schedule.nextOccurrenceDate??schedule.rule.anchorDate;const row=insert.run(JSON.stringify(taskFromSchedule(schedule,first)));if(row.changes)created++;processed++;lastProcessedId=schedule.id;db.prepare('UPDATE recurring_schedules SET next_occurrence_date=NULL WHERE id=?').run(schedule.id);}
       continue;
      }
+     // Calendar rules retain their anchor, but never accumulate open copies.
+     // Historical and edited occurrences are preserved; a pending task blocks new ones.
+     const pending=db.prepare("SELECT 1 FROM tasks WHERE json_extract(body,'$.scheduleId')=? AND COALESCE(json_extract(body,'$.done'),0)=0 LIMIT 1").get(schedule.id);
+     if(pending){processed++;lastProcessedId=schedule.id;continue;}
      let cursor=schedule.nextOccurrenceDate;
-     if(cursor===null)continue;
-     let scheduleProcessed=0;let scheduleTruncated=false;
-     while(cursor&&cursor<=throughDay){
-      if(processed>=100||scheduleProcessed>=quota){scheduleTruncated=true;break;}
-      const result=insert.run(JSON.stringify(taskFromSchedule(schedule,cursor)));if(result.changes)created++;
-      const next=nextCalendarDate(schedule.rule,cursor,false);cursor=next;
-      processed++;scheduleProcessed++;
+     if(cursor===null){processed++;lastProcessedId=schedule.id;continue;}
+     if(cursor<throughDay)cursor=nextCalendarDate(schedule.rule,throughDay,true);
+     let attempts=0;
+     while(cursor&&attempts<quota&&processed<100){
+      const result=insert.run(JSON.stringify(taskFromSchedule(schedule,cursor)));
+      attempts++;processed++;lastProcessedId=schedule.id;
+      cursor=nextCalendarDate(schedule.rule,cursor,false);
+      if(result.changes){created++;break;}
      }
-     if(cursor&&cursor>throughDay&&!scheduleTruncated){
-      if(processed<100&&scheduleProcessed<quota){const result=insert.run(JSON.stringify(taskFromSchedule(schedule,cursor)));if(result.changes)created++;processed++;scheduleProcessed++;}
-      else scheduleTruncated=true;
-     }
+     if(!attempts){processed++;lastProcessedId=schedule.id;}
      db.prepare('UPDATE recurring_schedules SET next_occurrence_date=? WHERE id=?').run(cursor,schedule.id);
-     if(scheduleProcessed>0)lastProcessedId=schedule.id;
-     if(scheduleTruncated)truncated=true;
+
     }
     if(lastProcessedId!==lastId)db.prepare("INSERT INTO schedule_materializer_state(key,value) VALUES ('last_schedule_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(lastProcessedId));
     db.exec('COMMIT');return{created,truncated};

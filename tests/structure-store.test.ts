@@ -45,15 +45,15 @@ test('v6 successor fingerprints migrate in canonical order without hiding old ed
  try{makeVersionSixStore(edited.path,true);const store=openTaskStore(edited.path,{now:()=>new Date('2026-10-29T12:00:00Z')});try{assert.throws(()=>store.reopen(1),(error:unknown)=>error instanceof RecurrenceConflictError&&error.code==='edited-successor');}finally{store.close();}}finally{rmSync(edited.directory,{recursive:true,force:true});}
 });
 
-test('calendar schedules materialize idempotently with due instances and a future preview',()=>{
+test('calendar schedules keep one pending occurrence without backfilling missed dates',()=>{
  const f=fixture();const store=openTaskStore(f.path,{now:()=>new Date('2026-10-29T12:00:00Z')});
  try{
   const schedule=store.createSchedule({title:'Revisar diário',notes:'',checklist:[],areaId:null,projectId:null,headingId:null,tagIds:[],deadlineOffset:null,reminderTime:null,rule:{mode:'calendar',unit:'day',interval:1,anchorDate:'2026-10-28'}});
-  assert.deepEqual(store.materializeSchedules('2026-10-29'),{created:3,truncated:false});
+  assert.deepEqual(store.materializeSchedules('2026-10-29'),{created:1,truncated:false});
   const second=openTaskStore(f.path,{now:()=>new Date('2026-10-29T12:00:00Z')});
   try{assert.deepEqual(second.materializeSchedules('2026-10-29'),{created:0,truncated:false});}finally{second.close();}
   const occurrences=store.list().filter(task=>task.scheduleId===schedule.id).sort((a,b)=>a.scheduledFor!.localeCompare(b.scheduledFor!));
-  assert.deepEqual(occurrences.map(task=>task.scheduledFor),['2026-10-28','2026-10-29','2026-10-30']);
+  assert.deepEqual(occurrences.map(task=>task.scheduledFor),['2026-10-29']);
   store.removeSchedule(schedule.id);assert.ok(store.list().filter(task=>task.title==='Revisar diário').every(task=>task.scheduleId==null));
  }finally{store.close();rmSync(f.directory,{recursive:true,force:true});}
 });
@@ -128,5 +128,54 @@ test('legacy recurring successors shift reminders by the new planned day in Bel�
   const task=store.create({title:'Reminder series',when:'Planejada',plannedDate:'2026-10-29',reminderAt:'2026-10-29T11:00:00.000Z',recurrence:'daily'});
   store.update(task.id,{done:true});const next=store.list().find(item=>item.previousId===task.id)!;
   assert.equal(next.plannedDate,'2026-10-30');assert.equal(next.reminderAt,'2026-10-30T11:00:00.000Z');
+ }finally{store.close();rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('an overdue calendar occurrence stays unique across days and completion preserves fixed dates',()=>{
+ const f=fixture();let now=new Date('2026-11-07T12:00:00Z');
+ const store=openTaskStore(f.path,{now:()=>now});
+ try{
+  const schedule=store.createSchedule({title:'First Saturday fixture',notes:'',checklist:[],areaId:null,projectId:null,headingId:null,tagIds:[],deadlineOffset:null,reminderTime:null,rule:{mode:'calendar',unit:'month',interval:1,anchorDate:'2026-11-01',ordinalWeekdays:[{weekday:6,ordinal:1}]}});
+  store.materializeSchedules('2026-11-07');
+  const first=store.list().find(t=>t.scheduleId===schedule.id)!;
+  assert.equal(first.scheduledFor,'2026-11-07');
+  now=new Date('2026-11-20T12:00:00Z');
+  assert.equal(store.materializeSchedules('2026-11-20').created,0);
+  assert.equal(store.list().filter(t=>t.scheduleId===schedule.id&&!t.done).length,1);
+  assert.equal(store.get(first.id)?.scheduledFor,'2026-11-07');
+  store.update(first.id,{done:true});
+  store.materializeSchedules('2026-11-20');
+  const pending=store.list().filter(t=>t.scheduleId===schedule.id&&!t.done);
+  assert.equal(pending.length,1);assert.equal(pending[0].scheduledFor,'2026-12-05');
+  assert.equal(store.get(first.id)?.done,true);
+ }finally{store.close();rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('resuming a paused calendar rule without a cursor starts at its next fixed date',()=>{
+ const f=fixture();const store=openTaskStore(f.path,{now:()=>new Date('2026-11-06T12:00:00Z')});
+ try{
+  const schedule=store.createSchedule({title:'Paused fourth Sunday',notes:'',checklist:[],areaId:null,projectId:null,headingId:null,tagIds:[],deadlineOffset:null,reminderTime:null,rule:{mode:'calendar',unit:'month',interval:1,anchorDate:'2026-01-01',ordinalWeekdays:[{weekday:0,ordinal:4}],paused:true}});
+  assert.equal(schedule.nextOccurrenceDate,null);
+  store.updateSchedule(schedule.id,{rule:{paused:false}});
+  store.materializeSchedules('2026-11-06');
+  const pending=store.list().filter(t=>t.scheduleId===schedule.id&&!t.done);
+  assert.equal(pending.length,1);assert.equal(pending[0].scheduledFor,'2026-11-22');
+ }finally{store.close();rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('completing a calendar task cannot recreate its completed date or backfill a paused period',()=>{
+ const f=fixture();let now=new Date('2026-11-06T12:00:00Z');const store=openTaskStore(f.path,{now:()=>now});
+ try{
+  const schedule=store.createSchedule({title:'Single daily fixture',notes:'',checklist:[],areaId:null,projectId:null,headingId:null,tagIds:[],deadlineOffset:null,reminderTime:null,rule:{mode:'calendar',unit:'day',interval:1,anchorDate:'2026-10-01'}});
+  store.materializeSchedules('2026-11-06');const first=store.list().find(t=>t.scheduleId===schedule.id)!;
+  assert.equal(first.scheduledFor,'2026-11-06');store.update(first.id,{done:true});
+  store.materializeSchedules('2026-11-06');
+  const next=store.list().find(t=>t.scheduleId===schedule.id&&!t.done)!;assert.equal(next.scheduledFor,'2026-11-07');
+  now=new Date('2026-11-20T12:00:00Z');
+  assert.equal(store.materializeSchedules('2026-11-20').created,0);
+  assert.equal(store.list().filter(t=>t.scheduleId===schedule.id&&!t.done).length,1);
+  store.update(next.id,{done:true});store.materializeSchedules('2026-11-20');
+  assert.deepEqual(store.list().filter(t=>t.scheduleId===schedule.id&&!t.done).map(t=>t.scheduledFor),['2026-11-20']);
+  assert.equal(store.list().filter(t=>t.scheduleId===schedule.id).length,3);
  }finally{store.close();rmSync(f.directory,{recursive:true,force:true});}
 });

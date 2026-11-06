@@ -38,6 +38,8 @@ export async function runSchedulerTick(options: SchedulerTickOptions = {}): Prom
   const path = options.dbPath || process.env.PAINEL_DB_PATH || join(process.cwd(), 'data', 'painel.sqlite');
   const now = options.now ?? new Date();
   const timestamp = now.getTime();
+  const clockStarted = performance.now();
+  const currentTime = () => timestamp + Math.max(0, performance.now() - clockStarted);
   const today = localDay(now);
   const config = options.config === undefined ? (() => { try { return loadWebPushConfig(); } catch { return null; } })() : options.config;
   const notificationStore = openNotificationStore(path, { config, now: () => timestamp });
@@ -71,11 +73,11 @@ export async function runSchedulerTick(options: SchedulerTickOptions = {}): Prom
       for (const subscription of subscriptions) {
         if (result.attempted >= 100 || Date.now() - tickStarted >= maxDurationMs) { completedTaskBatch = false; break; }
         const currentTask = taskStore.get(task.id);
-        if (!currentTask || currentTask.done || currentTask.reminderAt !== reminderAt || !notificationStore.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, Date.now())) continue;
+        if (!currentTask || currentTask.done || currentTask.reminderAt !== reminderAt || !notificationStore.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, currentTime())) continue;
         const claim = notificationStore.claimDelivery(task.id, reminderAt, subscription.endpointHash, timestamp);
         if (!claim) continue;
         const confirmedTask = taskStore.get(task.id);
-        const confirmedSession = notificationStore.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, Date.now());
+        const confirmedSession = notificationStore.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, currentTime());
         if (!confirmedTask || confirmedTask.done || confirmedTask.reminderAt !== reminderAt || !confirmedSession) {
           notificationStore.releaseDelivery(claim, timestamp);
           continue;
@@ -111,6 +113,8 @@ export async function sendSessionTest(options: {
   send?: NotificationSender;
 }): Promise<{ attempted: number; sent: number; failed: number }> {
   const timestamp = (options.now ?? new Date()).getTime();
+  const clockStarted = performance.now();
+  const currentTime = () => timestamp + Math.max(0, performance.now() - clockStarted);
   const store = openNotificationStore(options.dbPath, { config: options.config, now: () => timestamp });
   try {
     const subscriptions: StoredSubscription[] = store.claimManualTests(options.token, timestamp);
@@ -118,7 +122,7 @@ export async function sendSessionTest(options: {
     const send = options.send ?? sendWebPush;
     const payload = JSON.stringify({ title: 'Koema', body: 'Notificações ativadas.', url: '/prototype', tag: 'koema-test' });
     for (const subscription of subscriptions) {
-      if (!store.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, Date.now())) continue;
+      if (!store.isSubscriptionActive(subscription.tokenHash, subscription.endpointHash, currentTime())) continue;
       try { await send(options.config, subscription.subscription, payload); result.sent++; }
       catch (error) { result.failed++; if (goneStatus(error)) store.removeEndpoint(subscription.endpointHash); }
     }
